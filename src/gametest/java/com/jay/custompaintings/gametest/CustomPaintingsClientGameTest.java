@@ -17,8 +17,6 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.data.AtlasIds;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.decoration.painting.Painting;
 import net.minecraft.world.entity.decoration.painting.PaintingVariant;
 import net.minecraft.world.level.block.Blocks;
@@ -66,7 +64,9 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
 
             Painting placed = placePainting(world, 0, 2, 2);
             UUID placedId = placed.getUUID();
-            world.getConnection().waitForClientboundEntityUpdates(EntityTypes.PAINTING);
+            // Paintings use noUpdateInterval() (Integer.MAX_VALUE), so waitForClientboundEntityUpdates
+            // would wait essentially forever. Flush packets, then wait for the concrete entity instead.
+            world.getConnection().waitForClientboundPackets();
             context.waitFor(client -> client.level.getEntity(placedId) instanceof Painting, TIMEOUT_TICKS);
             BlockPos paintingPos = context.computeOnClient(client -> client.level.getEntity(placedId).blockPosition());
             context.getInput().lookAt(paintingPos);
@@ -92,7 +92,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             assertSprites(context, 0, 2, 2);
             Painting reloggedPainting = placePainting(world, 0, 2, 2);
             persistedPaintingId = reloggedPainting.getUUID();
-            world.getConnection().waitForClientboundEntityUpdates(EntityTypes.PAINTING);
+            world.getConnection().waitForClientboundPackets();
             context.waitFor(client -> client.level.getEntity(persistedPaintingId) instanceof Painting, TIMEOUT_TICKS);
             BlockPos reloggedPos = context.computeOnClient(client -> client.level.getEntity(persistedPaintingId).blockPosition());
             context.getInput().lookAt(reloggedPos);
