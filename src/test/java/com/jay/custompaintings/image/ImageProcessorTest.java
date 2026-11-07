@@ -60,6 +60,15 @@ class ImageProcessorTest {
     }
 
     @Test
+    void imageContentsMustMatchTheExtension() throws IOException {
+        BufferedImage source = new BufferedImage(4, 4, BufferedImage.TYPE_INT_RGB);
+        Path mislabeled = directory.resolve("actually-jpeg.png");
+        assertTrue(ImageIO.write(source, "jpg", mislabeled.toFile()));
+        IOException error = assertThrows(IOException.class, () -> ImageProcessor.read(mislabeled));
+        assertTrue(error.getMessage().contains("do not match"));
+    }
+
+    @Test
     void invalidOutputDimensionsAreRejected() {
         BufferedImage source = new BufferedImage(2, 2, BufferedImage.TYPE_INT_ARGB);
         assertThrows(IllegalArgumentException.class, () -> ImageProcessor.resize(source, 0, 16));

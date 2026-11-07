@@ -15,14 +15,20 @@ import java.util.concurrent.Executor;
 
 public final class CustomPaintingsClient implements ClientModInitializer {
     private static PaintingTextureManager paintings;
+    private static PaintingImportService imports;
 
     public static PaintingTextureManager paintings() {
         return paintings;
     }
 
+    public static PaintingImportService imports() {
+        return imports;
+    }
+
     @Override
     public void onInitializeClient() {
         paintings = new PaintingTextureManager(CustomPaintingsMod.imagesDirectory());
+        imports = new PaintingImportService(CustomPaintingsMod.imagesDirectory());
         Identifier applyId = CustomPaintingsMod.id("apply_textures");
         ResourceLoader loader = ResourceLoader.get(PackType.CLIENT_RESOURCES);
         loader.registerReloadListener(applyId, new PreparableReloadListener() {

@@ -1,6 +1,6 @@
 # Custom Paintings
 
-A client-side Fabric mod for **Minecraft Java 26.3** that replaces vanilla painting canvases with PNG/JPG images from your own config folder. Includes a Mod Menu screen with image previews, assignment details, loading errors, and a resource-reload button.
+A client-side Fabric mod for **Minecraft Java 26.3** that replaces vanilla painting canvases with your own PNG/JPG images. **Import images from inside the running game through Mod Menu**: use the native multi-file picker or drag files onto the config screen. The mod validates and saves them locally, refreshes previews, and applies the paintings automatically—no manual folder copying or game restart required.
 
 ## Pinned toolchain
 
@@ -22,17 +22,34 @@ The build uses **`net.fabricmc.fabric-loom`**, not the legacy/remapping plugin. 
 ## Install and use
 
 1. Install Fabric Loader **0.19.5** for Minecraft **26.3**, using **Java 25**.
-2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.0.0.jar` into your instance's `mods` folder.
-3. Launch the game once. The mod creates:
-   ```text
-   .minecraft/config/custompaintings/images/
-   ```
-   Launcher-specific instances use their own game directory, so the actual path may differ. The Mod Menu screen displays the exact path.
-4. Copy `.png`, `.jpg`, or `.jpeg` images into that folder. Only files directly inside the folder are scanned; subfolders and symbolic links are not followed.
-5. Press **F3 + T**, or open **Mods → Custom Paintings → Configure → Reload Paintings**. Both reload client resources; no restart is needed.
+2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.1.0.jar` into your instance's `mods` folder.
+3. Launch the game, open **Mods → Custom Paintings → Configure**, and choose **Upload Images…**.
+4. Select one or more `.png`, `.jpg`, or `.jpeg` files in the native file picker. Alternatively, drag them from your desktop onto the Custom Paintings screen.
+5. Wait for the import and automatic resource reload to finish. The screen shows thumbnails and assignment details; **Details** reports saved filenames, duplicates, and per-file errors.
 6. Place paintings in the world. Their fronts use your images; vanilla geometry, lighting, frame edges, and back textures remain intact.
 
-The mod is client-only. It does not upload your images to a server or change other players' paintings. It does not add new painting registry entries or item variants.
+“Upload” means **copying a local file into this instance's mod folder**. Nothing is uploaded to Minecraft servers, multiplayer hosts, or the internet, and other players do not see your custom images. The mod is client-only and does not add painting registry entries or item variants.
+
+The managed folder is:
+
+```text
+.minecraft/config/custompaintings/images/
+```
+
+Launcher-specific instances use their own game directory; the config screen displays the exact path. **Open Folder** is still available for bulk management, and **F3 + T** still reloads paintings. Only image files directly inside the folder are scanned; subfolders and symbolic links are not followed.
+
+### In-game import safety
+
+- Native SDL3 multi-file picker matches Minecraft 26.3's windowing backend; no Swing/AWT dialog is mixed into the game loop.
+- Drag-and-drop uses 26.3's `Screen.onFilesDrop` API.
+- Up to **64 files per batch**. Copying and image validation run sequentially on an IO worker, not the render thread.
+- PNG alpha is preserved. The actual file contents must be PNG/JPEG and match the extension; corrupt, empty, oversized, folder, and symlink selections are rejected.
+- Existing images are never silently overwritten. Identical content under the same name is skipped; different content gets a suffix such as `holiday-1.png`.
+- Portable filename sanitization prevents path traversal and Windows reserved-name problems. A hidden `.imports` staging folder keeps incomplete files out of the painting library.
+- One import/reload runs at a time. Closing the screen does not abort an active import; reopening shows its progress/result.
+- Select a loaded image and choose **Remove** to delete only the mod's managed copy, with confirmation. Your original source file is untouched.
+
+If the operating system cannot provide a native picker, the screen reports it and drag-and-drop remains available. Linux picker support depends on the desktop's SDL/portal backend.
 
 ### Which image replaces which painting?
 
@@ -57,13 +74,15 @@ To avoid unbounded memory use, each source image may be at most **32 MiB compres
 
 `CustomPaintingsModMenu` implements `ModMenuApi#getModConfigScreenFactory()`. Its screen provides:
 
-- A scrollable, keyboard-navigable list of every supported image file found.
-- Thumbnails uploaded as dynamic textures.
+- **Upload Images…** native multi-file selection and direct drag-and-drop importing.
+- A scrollable, keyboard-navigable list of every supported image file found, with dynamic-texture thumbnails.
 - Target painting IDs, output dimensions, and unassigned/error status.
+- Live import/reload progress and a scrollable per-file **Details** report.
+- Confirmed **Remove** action for a selected managed image.
 - Folder opening through 26.3's SDL-backed `Blaze3D.openPath` API (not the removed `Util.OS.openFile`).
-- **Open Images Folder**, **Reload Paintings**, and **Done** controls.
+- Responsive controls for small GUI sizes, translated labels/tooltips, and **Reload** / **Done** controls.
 
-The screen uses 26.3's `GuiGraphicsExtractor` and `RenderPipelines.GUI_TEXTURED`, not obsolete immediate-mode rendering calls.
+The screen uses 26.3's `GuiGraphicsExtractor` and `RenderPipelines.GUI_TEXTURED`, not obsolete immediate-mode rendering calls. Native picker callbacks copy SDL's temporary path list immediately, marshal results back to the client thread, and release callback/filter allocations after completion.
 
 ## Rendering implementation
 
@@ -97,8 +116,8 @@ gradlew.bat build
 Outputs:
 
 ```text
-build/libs/custompaintings-1.0.0.jar
-build/libs/custompaintings-1.0.0-sources.jar
+build/libs/custompaintings-1.1.0.jar
+build/libs/custompaintings-1.1.0-sources.jar
 ```
 
 Install the non-sources JAR. The Gradle wrapper is executable in Git and its JAR/distribution are checksum-pinned. The wrapper JAR matches Gradle's published SHA-256:
@@ -113,7 +132,7 @@ For a development client, run `./gradlew runClient`. Its game directory is `run/
 
 ## Tests and CI
 
-`./gradlew build` runs JUnit tests for PNG/JPG decoding, resizing, alpha preservation, malformed-file handling, size validation, deterministic assignment, exact-name overrides, and cycling behavior. These tests do not launch Minecraft or require a GPU.
+`./gradlew build` runs JUnit tests for PNG/JPG decoding, format/extension validation, resizing, alpha preservation, malformed-file handling, size validation, deterministic assignment, exact-name overrides, and cycling behavior. Importer tests cover byte-preserving copies, duplicate skipping, collision suffixes, rejected folders/symlinks, batch limits, progress, portable filenames, and staging cleanup. These tests do not launch Minecraft or require a GPU.
 
 The GitHub Actions workflow runs on pushes to `main`, session branches, version tags (`v*`), pull requests, and manual dispatch. It uses the requested `actions/checkout@v4`, Temurin Java 25 through `actions/setup-java@v4`, `gradle/actions/setup-gradle@v4`, and `actions/upload-artifact@v4`. Download `custompaintings-jars` from a successful workflow run for temporary CI artifacts.
 
@@ -129,7 +148,7 @@ The release attaches `custompaintings-<version>.jar` and `custompaintings-<versi
 
 Existing releases are never overwritten. If `v<version>` already exists, automatic publication skips that version; bump `mod_version` and merge the change into `main` to publish the next release. Session-branch pushes and pull requests still build and test the mod, but do not create releases.
 
-A successful compilation is not a substitute for an in-game smoke test. Before distributing a build, launch 26.3, add a PNG and JPG, reload, check Mod Menu previews, and place paintings of several aspect ratios.
+A successful compilation is not a substitute for an in-game smoke test. Before distributing a build, launch 26.3, import a transparent PNG and a JPG through both the picker and drag-and-drop, check Details and Mod Menu previews, cancel/reopen the picker, remove a managed copy, and place paintings of several aspect ratios. Test the native picker on each target desktop OS.
 
 ## Project layout
 
@@ -140,10 +159,14 @@ src/main/java/com/jay/custompaintings/
 │   ├── CustomPaintingsClient.java
 │   ├── CustomPaintingsModMenu.java
 │   ├── CustomPaintingsScreen.java
+│   ├── ImageFileChooser.java
+│   ├── ImportDetailsScreen.java
+│   ├── PaintingImportService.java
 │   ├── PaintingTextureManager.java
 │   └── mixin/SpriteLoaderMixin.java
 └── image/
     ├── ImageAssignment.java
+    ├── ImageImporter.java
     └── ImageProcessor.java
 src/main/resources/
 ├── fabric.mod.json

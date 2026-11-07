@@ -59,6 +59,14 @@ public final class ImageProcessor {
             }
             ImageReader reader = readers.next();
             try {
+                String format = reader.getFormatName().toLowerCase(Locale.ROOT);
+                String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+                boolean png = name.endsWith(".png");
+                boolean matchesExtension = png ? format.equals("png")
+                        : format.equals("jpeg") || format.equals("jpg");
+                if (!matchesExtension) {
+                    throw new IOException("Image contents do not match the PNG/JPG file extension");
+                }
                 reader.setInput(imageInput, true, true);
                 int width = reader.getWidth(0);
                 int height = reader.getHeight(0);

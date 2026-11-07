@@ -3,7 +3,7 @@
   "id": "custompaintings",
   "version": "${version}",
   "name": "Custom Paintings",
-  "description": "Replace vanilla painting canvases with your own PNG and JPG images, loaded from your config folder.",
+  "description": "Import PNG/JPG paintings from inside Minecraft through Mod Menu, with drag-and-drop, previews, and automatic reloads.",
   "authors": ["Skid-ster"],
   "contact": {
     "homepage": "https://github.com/Skid-ster/CustomPaintings",
