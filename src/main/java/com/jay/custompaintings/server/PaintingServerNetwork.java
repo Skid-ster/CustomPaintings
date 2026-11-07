@@ -132,14 +132,17 @@ public final class PaintingServerNetwork {
 
     private static void removePlacedPaintings(MinecraftServer server, int slot) {
         server.getAllLevels().forEach(level -> {
+            // Snapshot first: discard()/dropItem() mutate the live entity lookup while we iterate.
+            List<net.minecraft.world.entity.decoration.painting.Painting> paintings = new ArrayList<>();
             for (net.minecraft.world.entity.Entity entity : level.getAllEntities()) {
                 if (entity instanceof net.minecraft.world.entity.decoration.painting.Painting painting
                         && painting.getVariant().unwrapKey()
                         .flatMap(key -> PaintingRuntime.slotFromVariant(key.identifier()))
                         .map(id -> id == slot).orElse(false)) {
-                    painting.discard();
+                    paintings.add(painting);
                 }
             }
+            paintings.forEach(net.minecraft.world.entity.Entity::discard);
         });
     }
 
@@ -150,16 +153,17 @@ public final class PaintingServerNetwork {
             if (holder == null) {
                 return;
             }
+            // Snapshot first: setVariant()/dropItem()/discard() can mutate the live entity lookup.
+            List<net.minecraft.world.entity.decoration.painting.Painting> paintings = new ArrayList<>();
             for (net.minecraft.world.entity.Entity entity : level.getAllEntities()) {
-                if (!(entity instanceof net.minecraft.world.entity.decoration.painting.Painting painting)) {
-                    continue;
-                }
-                boolean custom = painting.getVariant().unwrapKey()
+                if (entity instanceof net.minecraft.world.entity.decoration.painting.Painting painting
+                        && painting.getVariant().unwrapKey()
                         .flatMap(key -> PaintingRuntime.slotFromVariant(key.identifier()))
-                        .map(id -> id == slot).orElse(false);
-                if (!custom) {
-                    continue;
+                        .map(id -> id == slot).orElse(false)) {
+                    paintings.add(painting);
                 }
+            }
+            for (var painting : paintings) {
                 var previous = painting.getVariant();
                 ((com.jay.custompaintings.mixin.PaintingAccessor) painting).custompaintings$setVariant(holder);
                 if (!painting.survives()) {
