@@ -1,0 +1,14 @@
+{
+  "config.custompaintings.title": "Custom Paintings",
+  "config.custompaintings.summary": "%s image(s) loaded; %s assigned to painting canvases",
+  "config.custompaintings.empty": "No PNG or JPG images found.",
+  "config.custompaintings.emptyHint": "Add images to the folder above, then reload paintings.",
+  "config.custompaintings.openFolder": "Open Images Folder",
+  "config.custompaintings.reload": "Reload Paintings",
+  "config.custompaintings.done": "Done",
+  "config.custompaintings.replaces": "Replaces %s",
+  "config.custompaintings.replacesMany": "Replaces %s painting canvases",
+  "config.custompaintings.unassigned": "Loaded; no available painting slot",
+  "config.custompaintings.error": "Could not load: %s",
+  "config.custompaintings.folderError": "Image folder error: %s"
+}

@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.jay.custompaintings.client.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "environment": "client",
+  "client": [
+    "SpriteLoaderMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
