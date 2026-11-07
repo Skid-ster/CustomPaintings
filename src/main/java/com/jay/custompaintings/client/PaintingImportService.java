@@ -1,9 +1,9 @@
 package com.jay.custompaintings.client;
 
 import com.jay.custompaintings.CustomPaintingsMod;
+import com.jay.custompaintings.image.ImageFit;
 import com.jay.custompaintings.image.ImageImporter;
 import com.jay.custompaintings.image.ImageProcessor;
-import com.jay.custompaintings.library.PaintingEntry;
 import com.jay.custompaintings.library.PaintingLibraryStore;
 import com.jay.custompaintings.library.PaintingSizes;
 import com.jay.custompaintings.network.PaintingPayloads;
@@ -59,10 +59,15 @@ public final class PaintingImportService {
     }
 
     public boolean importImages(List<Path> files) {
-        return importImages(files, PaintingSizes.DEFAULT);
+        return importImages(files, null, ImageFit.FIT);
     }
 
     public boolean importImages(List<Path> files, PaintingSizes.Size size) {
+        return importImages(files, size, ImageFit.FIT);
+    }
+
+    /** A null size chooses the closest supported canvas for each image's own proportions. */
+    public boolean importImages(List<Path> files, PaintingSizes.Size size, ImageFit fit) {
         List<Path> copy = List.copyOf(files);
         if (copy.isEmpty() || copy.size() > ImageImporter.MAX_BATCH_FILES || !library.canEdit()) {
             return false;
@@ -79,12 +84,12 @@ public final class PaintingImportService {
             state.set(new State(Phase.IMPORTING, 0, copy.size(), "", null, null));
         }
         Minecraft minecraft = Minecraft.getInstance();
-        CompletableFuture.supplyAsync(() -> uploadBatch(copy, size), Util.ioPool())
+        CompletableFuture.supplyAsync(() -> uploadBatch(copy, size, fit), Util.ioPool())
                 .whenCompleteAsync((report, error) -> finishBatch(report, error), minecraft);
         return true;
     }
 
-    private ImageImporter.Report uploadBatch(List<Path> files, PaintingSizes.Size size) {
+    private ImageImporter.Report uploadBatch(List<Path> files, PaintingSizes.Size size, ImageFit fit) {
         List<ImageImporter.Result> results = new ArrayList<>();
         int completed = 0;
         for (Path file : files) {
@@ -92,12 +97,11 @@ public final class PaintingImportService {
             state.set(new State(Phase.IMPORTING, completed, files.size(), sourceName, null, null));
             try {
                 BufferedImage image = ImageProcessor.read(file);
-                byte[] png = PaintingLibraryStore.encodePng(ImageProcessor.resize(image,
-                        size.width() * PaintingEntry.TEXTURE_PIXELS_PER_BLOCK,
-                        size.height() * PaintingEntry.TEXTURE_PIXELS_PER_BLOCK));
+                byte[] png = PaintingLibraryStore.encodePng(ImageProcessor.prepareMaster(image));
+                PaintingSizes.Size target = size == null ? PaintingSizes.auto(image.getWidth(), image.getHeight()) : size;
                 String name = defaultName(sourceName);
                 PaintingPayloads.Result result = request(new PaintingPayloads.Upload(
-                        requestIds.incrementAndGet(), name, size.width(), size.height(), png));
+                        requestIds.incrementAndGet(), name, target.width(), target.height(), fit.id(), png));
                 if (result.success()) {
                     results.add(new ImageImporter.Result(sourceName, name, ImageImporter.Status.IMPORTED, result.message()));
                 } else {
@@ -127,8 +131,20 @@ public final class PaintingImportService {
     }
 
     public boolean resize(int slot, PaintingSizes.Size size) {
-        return simpleOperation(Phase.RELOADING, new PaintingPayloads.Resize(
-                requestIds.incrementAndGet(), slot, size.width(), size.height()));
+        return library.entry(slot)
+                .map(entry -> adjust(slot, entry.name(), size, entry.fit()))
+                .orElse(false);
+    }
+
+    public boolean setFit(int slot, ImageFit fit) {
+        return library.entry(slot)
+                .map(entry -> adjust(slot, entry.name(), PaintingSizes.of(entry.width(), entry.height()), fit))
+                .orElse(false);
+    }
+
+    public boolean adjust(int slot, String name, PaintingSizes.Size size, ImageFit fit) {
+        return simpleOperation(Phase.RELOADING, new PaintingPayloads.Adjust(
+                requestIds.incrementAndGet(), slot, name, size.width(), size.height(), fit.id()));
     }
 
     public boolean remove(int slot) {
@@ -163,7 +179,7 @@ public final class PaintingImportService {
         long id = switch (payload) {
             case PaintingPayloads.Upload upload -> upload.requestId();
             case PaintingPayloads.Rename rename -> rename.requestId();
-            case PaintingPayloads.Resize resize -> resize.requestId();
+            case PaintingPayloads.Adjust adjust -> adjust.requestId();
             case PaintingPayloads.Remove remove -> remove.requestId();
             default -> throw new IllegalArgumentException("Unsupported request");
         };

@@ -76,6 +76,46 @@ class ImageProcessorTest {
     }
 
     @Test
+    void fitPreservesProportionsAndTransparentPadding() {
+        BufferedImage source = new BufferedImage(8, 4, BufferedImage.TYPE_INT_ARGB);
+        var graphics = source.createGraphics();
+        graphics.setColor(Color.RED);
+        graphics.fillRect(0, 0, 8, 4);
+        graphics.dispose();
+        ImageProcessor.Pixels pixels = ImageProcessor.compose(source, 16, 16, ImageFit.FIT);
+        assertEquals(0, pixels.argb()[0] >>> 24);
+        int center = pixels.argb()[8 * 16 + 8];
+        assertEquals(255, center >>> 24);
+        assertTrue((center >> 16 & 255) > 200);
+    }
+
+    @Test
+    void fillCropsWithoutDistortionAndStretchFillsExactly() {
+        BufferedImage source = new BufferedImage(8, 4, BufferedImage.TYPE_INT_ARGB);
+        var graphics = source.createGraphics();
+        graphics.setColor(Color.BLUE);
+        graphics.fillRect(0, 0, 8, 4);
+        graphics.dispose();
+        ImageProcessor.Pixels fill = ImageProcessor.compose(source, 16, 16, ImageFit.FILL);
+        assertEquals(255, fill.argb()[0] >>> 24);
+        ImageProcessor.Pixels stretch = ImageProcessor.compose(source, 16, 16, ImageFit.STRETCH);
+        assertEquals(255, stretch.argb()[0] >>> 24);
+        assertEquals(255, stretch.argb()[15 * 16 + 15] >>> 24);
+    }
+
+    @Test
+    void prepareMasterDownscalesLargeImagesButKeepsSmallOnes() {
+        BufferedImage large = new BufferedImage(2048, 1024, BufferedImage.TYPE_INT_ARGB);
+        ImageProcessor.Pixels master = ImageProcessor.prepareMaster(large);
+        assertTrue((long) master.width() * master.height() <= ImageProcessor.MAX_OUTPUT_PIXELS);
+        assertEquals(2, master.width() / master.height());
+        BufferedImage small = new BufferedImage(32, 16, BufferedImage.TYPE_INT_ARGB);
+        ImageProcessor.Pixels unchanged = ImageProcessor.prepareMaster(small);
+        assertEquals(32, unchanged.width());
+        assertEquals(16, unchanged.height());
+    }
+
+    @Test
     void supportedExtensionsAreCaseInsensitive() {
         assertTrue(ImageProcessor.isSupported("PHOTO.PNG"));
         assertTrue(ImageProcessor.isSupported("photo.jpg"));

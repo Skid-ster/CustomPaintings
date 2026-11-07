@@ -1,6 +1,7 @@
 package com.jay.custompaintings.gametest;
 
 import com.jay.custompaintings.client.CustomPaintingsClient;
+import com.jay.custompaintings.image.ImageFit;
 import com.jay.custompaintings.library.PaintingRuntime;
 import com.jay.custompaintings.library.PaintingSizes;
 import com.mojang.blaze3d.platform.NativeImage;
@@ -113,6 +114,39 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                     && hasSprites(client, 0, 2, 2), TIMEOUT_TICKS);
             assertSprites(context, 0, 2, 2);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-after-resource-reload"));
+
+            // v1.3: auto-size from image proportions, preserve alpha, and exercise 8×8 + fit modes.
+            // Remove the persisted 2×2 first so the next painting does not overlap it on the test wall.
+            remove(context, 0);
+            waitForLibrary(context, 0, 0, 0);
+            context.waitFor(client -> client.level.getEntity(persistedPaintingId) == null, TIMEOUT_TICKS);
+            Path wideAlpha = createWideAlphaTestImage(context);
+            uploadAuto(context, wideAlpha);
+            waitForEntry(context, 0, 1, 2, 1, ImageFit.FIT);
+            assertSprites(context, 0, 2, 1);
+            assertSpriteHasTransparentCenter(context, 0, 2, 1);
+            Painting widePlaced = placePainting(reopened, 0, 2, 1);
+            UUID wideId = widePlaced.getUUID();
+            reopened.getConnection().waitForClientboundPackets();
+            context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting, TIMEOUT_TICKS);
+            BlockPos widePos = context.computeOnClient(client -> client.level.getEntity(wideId).blockPosition());
+            context.getInput().lookAt(widePos);
+            context.waitTicks(20);
+            assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-wide-alpha"));
+
+            adjust(context, 0, "Large Mural", 8, 8, ImageFit.FILL);
+            waitForEntry(context, 0, 1, 8, 8, ImageFit.FILL);
+            assertSprites(context, 0, 8, 8);
+            context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting painting
+                    && painting.getVariant().unwrapKey()
+                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(0, 8, 8)))
+                    .orElse(false), TIMEOUT_TICKS);
+            context.waitTicks(20);
+            assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-8x8-fill"));
+
+            adjust(context, 0, "Large Mural", 8, 8, ImageFit.STRETCH);
+            waitForEntry(context, 0, 1, 8, 8, ImageFit.STRETCH);
+            assertSprites(context, 0, 8, 8);
         }
     }
 
@@ -142,10 +176,48 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
         });
     }
 
+    private static Path createWideAlphaTestImage(ClientGameTestContext context) {
+        return context.computeOnClient(client -> {
+            Path file = client.gameDirectory.toPath().resolve("custompaintings-gametest-wide-alpha.png");
+            BufferedImage image = new BufferedImage(512, 256, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = image.createGraphics();
+            try {
+                graphics.setColor(Color.RED);
+                graphics.fillRect(0, 0, 512, 256);
+                graphics.setComposite(java.awt.AlphaComposite.Clear);
+                graphics.fillRect(128, 64, 256, 128);
+            } finally {
+                graphics.dispose();
+            }
+            try {
+                ImageIO.write(image, "png", file.toFile());
+            } catch (IOException exception) {
+                throw new UncheckedIOException("Could not write the generated wide alpha artwork", exception);
+            }
+            return file;
+        });
+    }
+
     private static void upload(ClientGameTestContext context, Path file) {
         context.runOnClient(client -> {
             if (!CustomPaintingsClient.imports().importImages(List.of(file), PaintingSizes.DEFAULT)) {
                 throw new AssertionError("Upload did not start; the singleplayer owner should be able to edit");
+            }
+        });
+    }
+
+    private static void uploadAuto(ClientGameTestContext context, Path file) {
+        context.runOnClient(client -> {
+            if (!CustomPaintingsClient.imports().importImages(List.of(file))) {
+                throw new AssertionError("Auto-sized upload did not start");
+            }
+        });
+    }
+
+    private static void adjust(ClientGameTestContext context, int slot, String name, int width, int height, ImageFit fit) {
+        context.runOnClient(client -> {
+            if (!CustomPaintingsClient.imports().adjust(slot, name, PaintingSizes.of(width, height), fit)) {
+                throw new AssertionError("Adjust did not start");
             }
         });
     }
@@ -176,6 +248,28 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                     .map(entry -> entry.width() == width && entry.height() == height)
                     .orElse(false);
         }, TIMEOUT_TICKS);
+    }
+
+    private static void waitForEntry(ClientGameTestContext context, int slot, int count, int width, int height, ImageFit fit) {
+        context.waitFor(client -> {
+            var library = CustomPaintingsClient.library();
+            if (!library.synced() || library.library().count() != count || CustomPaintingsClient.imports().state().busy()) {
+                return false;
+            }
+            return library.library().get(slot)
+                    .map(entry -> entry.width() == width && entry.height() == height && entry.fit() == fit)
+                    .orElse(false);
+        }, TIMEOUT_TICKS);
+    }
+
+    private static void assertSpriteHasTransparentCenter(ClientGameTestContext context, int slot, int width, int height) {
+        context.runOnClient(client -> {
+            var paintings = client.getAtlasManager().getAtlasOrThrow(AtlasIds.PAINTINGS);
+            var sprite = paintings.getSprite(PaintingRuntime.variantAssetId(slot, width, height));
+            if (!sprite.contents().isTransparent(0, width * 128, height * 128)) {
+                throw new AssertionError("Custom painting sprite lost its transparent center");
+            }
+        });
     }
 
     private static void assertSprites(ClientGameTestContext context, int slot, int width, int height) {
@@ -209,9 +303,9 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
         return world.getServer().computeOnServer(server -> {
             ServerPlayer player = world.getConnection().getServerPlayer();
             ServerLevel level = player.level();
-            BlockPos wall = player.blockPosition().offset(-2, 0, -4);
-            for (int x = 0; x < 5; x++) {
-                for (int y = 0; y < 5; y++) {
+            BlockPos wall = player.blockPosition().offset(-10, 0, -12);
+            for (int x = 0; x < 20; x++) {
+                for (int y = 0; y < 20; y++) {
                     level.setBlock(wall.offset(x, y, 0), Blocks.STONE.defaultBlockState(), 3);
                 }
             }
@@ -219,7 +313,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                     .lookupOrThrow(Registries.PAINTING_VARIANT)
                     .get(PaintingRuntime.variantKey(slot, width, height))
                     .orElseThrow(() -> new AssertionError("Custom painting variant is not registered"));
-            Painting painting = new Painting(level, wall.offset(2, 2, 1), Direction.SOUTH, variant);
+            Painting painting = new Painting(level, wall.offset(10, 10, 1), Direction.SOUTH, variant);
             if (!painting.survives()) {
                 throw new AssertionError("Test painting could not be placed on the generated wall");
             }

@@ -3,7 +3,6 @@ package com.jay.custompaintings.client;
 import com.jay.custompaintings.CustomPaintingsMod;
 import com.jay.custompaintings.image.ImageImporter;
 import com.jay.custompaintings.library.PaintingEntry;
-import com.jay.custompaintings.library.PaintingSizes;
 import com.jay.custompaintings.library.RecipeCatalog;
 import com.mojang.blaze3d.Blaze3D;
 import net.minecraft.client.Minecraft;
@@ -95,7 +94,7 @@ public final class CustomPaintingsScreen extends Screen {
         renameButton = Button.builder(Component.translatable("config.custompaintings.rename"), button -> editName())
                 .bounds(smallLeft, editY, smallWidth, 20).build();
         addRenderableWidget(renameButton);
-        sizeButton = Button.builder(Component.translatable("config.custompaintings.size"), button -> cycleSize())
+        sizeButton = Button.builder(Component.translatable("config.custompaintings.size"), button -> editSize())
                 .bounds(smallLeft + smallWidth + gap, editY, smallWidth, 20)
                 .tooltip(Tooltip.create(Component.translatable("config.custompaintings.size.tooltip"))).build();
         addRenderableWidget(sizeButton);
@@ -168,17 +167,10 @@ public final class CustomPaintingsScreen extends Screen {
         }
     }
 
-    private void cycleSize() {
+    private void editSize() {
         PaintingEntry entry = selected();
-        if (entry == null || imports.state().busy()) {
-            return;
-        }
-        List<PaintingSizes.Size> presets = PaintingSizes.PRESETS;
-        int index = presets.indexOf(PaintingSizes.of(entry.width(), entry.height()));
-        PaintingSizes.Size next = presets.get((index + 1) % presets.size());
-        clearNotice();
-        if (!imports.resize(entry.slot(), next)) {
-            setNotice(Component.translatable("config.custompaintings.import.busy"), WARNING);
+        if (entry != null && !imports.state().busy()) {
+            minecraft.gui.setScreen(new EditPaintingScreen(this, entry));
         }
     }
 
@@ -366,6 +358,7 @@ public final class CustomPaintingsScreen extends Screen {
             }
             PaintingEntry entry = painting.entry();
             return Component.translatable("config.custompaintings.entryStatus", entry.sizeLabel(),
+                    Component.translatable(entry.fit().translationKey()).getString(),
                     RecipeCatalog.get(entry.recipeId()).label());
         }
 

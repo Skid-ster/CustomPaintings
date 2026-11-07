@@ -72,6 +72,13 @@ public record PaintingLibrary(long revision, long recipeSeed, List<PaintingEntry
         return replace(existing.withName(name));
     }
 
+    public PaintingLibrary withReplaced(PaintingEntry replacement) {
+        if (!isOccupied(replacement.slot())) {
+            throw new IllegalArgumentException("Empty painting slot");
+        }
+        return replace(replacement);
+    }
+
     public PaintingLibrary without(int slot) {
         if (!isOccupied(slot)) {
             throw new IllegalArgumentException("Empty painting slot");

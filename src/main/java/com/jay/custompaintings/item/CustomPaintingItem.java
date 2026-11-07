@@ -85,6 +85,8 @@ public final class CustomPaintingItem extends Item {
                                 Consumer<Component> lines, TooltipFlag flag) {
         com.jay.custompaintings.library.PaintingLibraryAccess.current().get(slot).ifPresent(entry -> {
             lines.accept(Component.translatable("tooltip.custompaintings.size", entry.sizeLabel()));
+            lines.accept(Component.translatable("tooltip.custompaintings.fit",
+                    Component.translatable(entry.fit().translationKey())));
             lines.accept(Component.translatable("tooltip.custompaintings.recipe",
                     com.jay.custompaintings.library.RecipeCatalog.get(entry.recipeId()).label()));
         });

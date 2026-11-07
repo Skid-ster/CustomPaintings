@@ -2,7 +2,7 @@
 
 A Fabric mod for **Minecraft Java 26.3** that turns your PNG/JPG images into **up to 10 distinct custom paintings**. Each upload gets its own named painting variant, creative-inventory item, preview, and easy crafting recipe. Vanilla paintings are left untouched.
 
-Manage everything from inside the game through **Mod Menu**: native multi-file picker or drag-and-drop, thumbnails, rename, resize, remove, progress, and per-file details. The library is server-authoritative and synchronized to connected clients, so placed paintings, crafting, and previews agree in singleplayer and on modded servers.
+Manage everything from inside the game through **Mod Menu**: native multi-file picker or drag-and-drop, thumbnails, full editing (name, independent width/height, fit mode, auto-size), remove, progress, and per-file details. The library is server-authoritative and synchronized to connected clients, so placed paintings, crafting, and previews agree in singleplayer and on modded servers.
 
 ## Pinned toolchain
 
@@ -22,7 +22,7 @@ The build uses **`net.fabricmc.fabric-loom`**, not the legacy/remapping plugin. 
 ## Install and use
 
 1. Install Fabric Loader **0.19.5** for Minecraft **26.3**, using **Java 25**.
-2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.2.3.jar` into the **client** mods folder. For multiplayer, install the mod and Fabric API on the **server** too.
+2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.3.0.jar` into the **client** mods folder. For multiplayer, install the mod and Fabric API on the **server** too.
 3. Launch the game, open **Mods → Custom Paintings → Configure**, and choose **Upload Images**.
 4. Select `.png`, `.jpg`, or `.jpeg` files, or drag them onto the screen. Each image becomes a new custom painting in the first free slot.
 5. Wait for upload, server data reload, and texture reload. The screen shows previews, names, sizes, and assigned recipes.
@@ -32,8 +32,10 @@ The build uses **`net.fabricmc.fabric-loom`**, not the legacy/remapping plugin. 
 
 - Maximum **10** custom paintings per world/server library.
 - Each occupied slot has a stable id, its own item, variant, name, preview, and recipe.
-- **Rename** edits the display name used by the item, creative tab, and newly placed copies; existing placed paintings are renamed too.
-- **Size** cycles supported presets: 1×1, 2×1, 1×2, 2×2, 3×2, 2×3, 3×3, 4×4. Placed copies are resized automatically; copies that no longer fit on their wall drop as items.
+- **Edit** changes the display name used by the item, creative tab, and placed copies; existing placed paintings are renamed too.
+- **Size & Fit** adjusts width and height independently from **1×1 through 8×8**. Placed copies are resized automatically; copies that no longer fit on their wall drop as items.
+- **Auto Size From Image** chooses the supported canvas closest to the uploaded image's own proportions. New uploads default to this behavior.
+- **Fit modes**: **Fit** keeps the whole image undistorted and leaves unused canvas transparent; **Fill** keeps proportions and crops excess edges; **Stretch** fills the canvas exactly. The original aspect-preserving master is retained, so switching modes or sizes never compounds resampling loss.
 - **Remove** frees the slot and removes placed copies of that painting.
 - Easy recipes are randomly assigned once per library from ten distinct paper + dye combinations, persisted, and never collide with each other.
 
@@ -54,18 +56,19 @@ Clients keep synchronized images in memory for atlas/preview reloads. **Open Loc
 
 - Native SDL3 multi-file picker and 26.3 `Screen.onFilesDrop` drag-and-drop.
 - Source limits: **32 MiB compressed / 16,777,216 decoded pixels**; processed canvas at most **1,048,576 pixels**.
-- PNG alpha preserved; contents must match PNG/JPEG extension. Corrupt, empty, oversized, folder, and symlink selections are rejected.
+- PNG alpha is preserved end-to-end: transparent holes reveal the wall behind placed paintings, while opaque artwork remains solid. Contents must match PNG/JPEG extension. Corrupt, empty, oversized, folder, and symlink selections are rejected.
 - One operation at a time; closing the screen does not abort it. Details reports per-file success/failure.
 - Atomic manifest writes and canonical slot PNGs; original source files are untouched.
-- Legacy v1.1 replacement-only images are migrated into up to ten 2×2 custom slots on first load.
+- Legacy v1.1 replacement-only images are migrated into auto-sized custom slots on first load. v1.2 libraries keep their previous stretched appearance until edited.
 
 ## How it works
 
-- Ten stable custom items are registered at startup. A built-in data pack registers the fixed slot/size painting variants and slot recipes, avoiding unsafe mutation of frozen dynamic registries while a world runs.
+- Ten stable custom items are registered at startup. A built-in data pack pre-registers all 640 slot/size painting variants (10 slots × 8 widths × 8 heights) and slot recipes, avoiding unsafe mutation of frozen dynamic registries while a world runs.
 - The server library controls which slots are occupied. Recipe matches/displays and creative entries follow the library; a server data reload refreshes recipe book entries after changes.
-- Custom payloads sync metadata and processed PNGs to clients. A client-ready sync request and channel-registration sync avoid the Fabric login race; duplicate snapshots are ignored. The client invalidates cached creative tabs, reloads atlases, and verifies that every occupied slot exists in both the painting and item atlases.
+- Custom payloads (protocol v2) sync metadata and aspect-preserving master PNGs to clients. A client-ready sync request and channel-registration sync avoid the Fabric login race; duplicate snapshots are ignored. The client invalidates cached creative tabs, reloads atlases, and verifies that every occupied slot exists in both the painting and item atlases.
 - `SpriteLoader` hooks add custom sprites to the painting and item atlases without replacing vanilla art. The hook matches the atlas **sheet texture ids** (`minecraft:textures/atlas/paintings.png` and `minecraft:textures/atlas/items.png`), which is the id space `SpriteLoader` actually exposes; atlas verification/rendering uses the separate definition ids (`minecraft:paintings` / `minecraft:items`). GUI previews use official 26.3 `DynamicTexture`.
 - A painting mixin makes custom variants drop and pick-block as their own item instead of a generic vanilla painting.
+- A client renderer mixin draws custom artwork with the translucent entity pipeline and without vanilla's opaque canvas backing, so PNG transparency actually reveals the wall.
 
 ## Build locally
 
@@ -78,17 +81,17 @@ Install a full **JDK 25**, then:
 Outputs:
 
 ```text
-build/libs/custompaintings-1.2.3.jar
-build/libs/custompaintings-1.2.3-sources.jar
+build/libs/custompaintings-1.3.0.jar
+build/libs/custompaintings-1.3.0-sources.jar
 ```
 
 Install the non-sources JAR. The first build needs Fabric Maven, Mojang libraries, Maven Central, and TerraformersMC Maven. For a development client, run `./gradlew runClient`.
 
 ## Tests and CI
 
-`./gradlew build` runs JUnit tests for image decoding/validation/resizing, importer safety, the bounded library, persistence, rename/resize/remove, recipe uniqueness, and slot caps. These tests do not launch Minecraft or require a GPU.
+`./gradlew build` runs JUnit tests for image decoding/validation/fit/fill/stretch composition, importer safety, auto-sizing, the bounded library, lossless master persistence, rename/adjust/remove, recipe uniqueness, and slot caps. These tests do not launch Minecraft or require a GPU.
 
-There is also a separate **client gametest** source set under `src/gametest`. It launches Minecraft, uploads a generated test image, asserts that the painting and item atlas sprites are present, places a painting and checks screenshot pixels, resizes/removes it, relogs into the saved world, and triggers a manual resource reload. Run it locally with a display (or CI's headless Xvfb setup):
+There is also a separate **client gametest** source set under `src/gametest`. It launches Minecraft, uploads generated test images, asserts that the painting and item atlas sprites are present, places paintings and checks screenshot pixels, resizes/removes them, relogs into the saved world, triggers a manual resource reload, and exercises auto-sized wide art, preserved alpha, 8×8 murals, and fit-mode changes. Run it locally with a display (or CI's headless Xvfb setup):
 
 ```bash
 ./gradlew runClientGameTest

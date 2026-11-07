@@ -6,7 +6,8 @@
   "environment": "client",
   "client": [
     "SpriteLoaderMixin",
-    "CreativeModeTabsMixin"
+    "CreativeModeTabsMixin",
+    "PaintingRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1

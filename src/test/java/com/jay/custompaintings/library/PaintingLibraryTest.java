@@ -55,7 +55,9 @@ class PaintingLibraryTest {
         assertThrows(IllegalArgumentException.class, () -> PaintingEntry.normalizeName("bad\u0000name"));
         assertEquals("Sunset", PaintingEntry.normalizeName(" Sunset "));
         assertTrue(PaintingSizes.isSupported(4, 4));
-        assertFalse(PaintingSizes.isSupported(5, 1));
+        assertTrue(PaintingSizes.isSupported(5, 1));
+        assertTrue(PaintingSizes.isSupported(8, 8));
+        assertFalse(PaintingSizes.isSupported(9, 1));
         assertThrows(IllegalArgumentException.class, () -> entry(10, "paper_black"));
         assertThrows(IllegalArgumentException.class, () -> new PaintingEntry(0, "X", 2, 2, "slot_1.png", "a".repeat(64), "paper_black"));
     }
