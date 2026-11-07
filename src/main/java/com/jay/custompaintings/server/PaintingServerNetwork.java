@@ -6,6 +6,7 @@ import com.jay.custompaintings.library.PaintingLibrary;
 import com.jay.custompaintings.library.PaintingRuntime;
 import com.jay.custompaintings.network.PaintingPayloads;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.networking.v1.ClientboundPlayChannelEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.server.MinecraftServer;
@@ -40,15 +41,30 @@ public final class PaintingServerNetwork {
         ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.Resize.TYPE, (payload, context) ->
                 mutate(context.server(), context.player(), payload.requestId(), () -> {
                     PaintingServerState.store().resize(payload.slot(), payload.width(), payload.height());
-                    return "Painting resized; re-place existing copies to use the new size";
-                }));
+                    return "Painting resized";
+                }, () -> resizePlacedPaintings(context.server(), payload.slot(), payload.width(), payload.height())));
         ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.Remove.TYPE, (payload, context) ->
                 mutate(context.server(), context.player(), payload.requestId(), () -> {
                     PaintingServerState.store().remove(payload.slot());
                     return "Painting removed";
-                }));
+                }, () -> removePlacedPaintings(context.server(), payload.slot())));
+        ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.SyncRequest.TYPE, (payload, context) -> {
+            if (payload.protocolVersion() != PaintingPayloads.SyncRequest.PROTOCOL_VERSION) {
+                CustomPaintingsMod.LOGGER.warn("Ignoring painting sync request with protocol version {}", payload.protocolVersion());
+                return;
+            }
+            // The client explicitly asked for a snapshot, so it has the mod and a ready play receiver.
+            sendSync(context.player(), context.server(), false);
+        });
+        // Fabric fires JOIN before the client's minecraft:register packet arrives. Also sync when the
+        // client actually advertises the sync channel; duplicate snapshots are deduplicated client-side.
+        ClientboundPlayChannelEvents.REGISTER.register((listener, sender, server, channels) -> {
+            if (channels.contains(PaintingPayloads.Sync.TYPE.id())) {
+                sendSync(listener.getPlayer(), server, false);
+            }
+        });
         ServerPlayConnectionEvents.JOIN.register((listener, sender, server) ->
-                sendSync(listener.getPlayer(), server));
+                sendSync(listener.getPlayer(), server, true));
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             activeServer = server;
             com.jay.custompaintings.library.PaintingLibraryAccess.set(PaintingServerState::library);
@@ -114,6 +130,48 @@ public final class PaintingServerNetwork {
         }, server);
     }
 
+    private static void removePlacedPaintings(MinecraftServer server, int slot) {
+        server.getAllLevels().forEach(level -> {
+            for (net.minecraft.world.entity.Entity entity : level.getAllEntities()) {
+                if (entity instanceof net.minecraft.world.entity.decoration.painting.Painting painting
+                        && painting.getVariant().unwrapKey()
+                        .flatMap(key -> PaintingRuntime.slotFromVariant(key.identifier()))
+                        .map(id -> id == slot).orElse(false)) {
+                    painting.discard();
+                }
+            }
+        });
+    }
+
+    private static void resizePlacedPaintings(MinecraftServer server, int slot, int width, int height) {
+        server.getAllLevels().forEach(level -> {
+            var holder = level.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.PAINTING_VARIANT)
+                    .get(PaintingRuntime.variantKey(slot, width, height)).orElse(null);
+            if (holder == null) {
+                return;
+            }
+            for (net.minecraft.world.entity.Entity entity : level.getAllEntities()) {
+                if (!(entity instanceof net.minecraft.world.entity.decoration.painting.Painting painting)) {
+                    continue;
+                }
+                boolean custom = painting.getVariant().unwrapKey()
+                        .flatMap(key -> PaintingRuntime.slotFromVariant(key.identifier()))
+                        .map(id -> id == slot).orElse(false);
+                if (!custom) {
+                    continue;
+                }
+                var previous = painting.getVariant();
+                ((com.jay.custompaintings.mixin.PaintingAccessor) painting).custompaintings$setVariant(holder);
+                if (!painting.survives()) {
+                    // The new size no longer fits on this wall. Return the item instead of leaving a missing texture.
+                    ((com.jay.custompaintings.mixin.PaintingAccessor) painting).custompaintings$setVariant(previous);
+                    painting.dropItem(level, null);
+                    painting.discard();
+                }
+            }
+        });
+    }
+
     private static void renamePlacedPaintings(MinecraftServer server, int slot, String name) {
         String normalized = PaintingEntry.normalizeName(name);
         server.getAllLevels().forEach(level -> {
@@ -132,12 +190,12 @@ public final class PaintingServerNetwork {
 
     public static void broadcastSync(MinecraftServer server) {
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            sendSync(player, server);
+            sendSync(player, server, true);
         }
     }
 
-    private static void sendSync(ServerPlayer player, MinecraftServer server) {
-        if (!ServerPlayNetworking.canSend(player, PaintingPayloads.Sync.TYPE)) {
+    private static void sendSync(ServerPlayer player, MinecraftServer server, boolean requireChannel) {
+        if (requireChannel && !ServerPlayNetworking.canSend(player, PaintingPayloads.Sync.TYPE)) {
             return;
         }
         PaintingLibrary library = PaintingServerState.library();

@@ -4,7 +4,8 @@
   "package": "com.jay.custompaintings.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
-    "PaintingMixin"
+    "PaintingMixin",
+    "PaintingAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

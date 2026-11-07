@@ -103,6 +103,20 @@ public final class PaintingPayloads {
         }
     }
 
+    /** Sent by the client once its play listener is ready, so login cannot race channel registration. */
+    public record SyncRequest(int protocolVersion) implements CustomPacketPayload {
+        public static final int PROTOCOL_VERSION = 1;
+        public static final Type<SyncRequest> TYPE = new Type<>(CustomPaintingsMod.id("request_sync"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, SyncRequest> STREAM_CODEC =
+                StreamCodec.of((buf, request) -> buf.writeVarInt(request.protocolVersion()),
+                        buf -> new SyncRequest(buf.readVarInt()));
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
     public record Result(long requestId, boolean success, String message) implements CustomPacketPayload {
         public static final Type<Result> TYPE = new Type<>(CustomPaintingsMod.id("operation_result"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Result> STREAM_CODEC = StreamCodec.composite(
@@ -125,5 +139,6 @@ public final class PaintingPayloads {
         PayloadTypeRegistry.serverboundPlay().register(Rename.TYPE, Rename.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(Resize.TYPE, Resize.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(Remove.TYPE, Remove.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(SyncRequest.TYPE, SyncRequest.STREAM_CODEC);
     }
 }
