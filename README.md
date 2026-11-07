@@ -22,7 +22,7 @@ The build uses **`net.fabricmc.fabric-loom`**, not the legacy/remapping plugin. 
 ## Install and use
 
 1. Install Fabric Loader **0.19.5** for Minecraft **26.3**, using **Java 25**.
-2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.2.0.jar` into the **client** mods folder. For multiplayer, install the mod and Fabric API on the **server** too.
+2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.2.1.jar` into the **client** mods folder. For multiplayer, install the mod and Fabric API on the **server** too.
 3. Launch the game, open **Mods → Custom Paintings → Configure**, and choose **Upload Images**.
 4. Select `.png`, `.jpg`, or `.jpeg` files, or drag them onto the screen. Each image becomes a new custom painting in the first free slot.
 5. Wait for upload, server data reload, and texture reload. The screen shows previews, names, sizes, and assigned recipes.
@@ -33,8 +33,8 @@ The build uses **`net.fabricmc.fabric-loom`**, not the legacy/remapping plugin. 
 - Maximum **10** custom paintings per world/server library.
 - Each occupied slot has a stable id, its own item, variant, name, preview, and recipe.
 - **Rename** edits the display name used by the item, creative tab, and newly placed copies; existing placed paintings are renamed too.
-- **Size** cycles supported presets: 1×1, 2×1, 1×2, 2×2, 3×2, 2×3, 3×3, 4×4. Re-place existing copies after resizing.
-- **Remove** frees the slot. Placed copies keep their variant id but show missing art until the slot is reused.
+- **Size** cycles supported presets: 1×1, 2×1, 1×2, 2×2, 3×2, 2×3, 3×3, 4×4. Placed copies are resized automatically; copies that no longer fit on their wall drop as items.
+- **Remove** frees the slot and removes placed copies of that painting.
 - Easy recipes are randomly assigned once per library from ten distinct paper + dye combinations, persisted, and never collide with each other.
 
 ### Permissions and multiplayer
@@ -63,7 +63,7 @@ Clients keep synchronized images in memory for atlas/preview reloads. **Open Loc
 
 - Ten stable custom items are registered at startup. A built-in data pack registers the fixed slot/size painting variants and slot recipes, avoiding unsafe mutation of frozen dynamic registries while a world runs.
 - The server library controls which slots are occupied. Recipe matches/displays and creative entries follow the library; a server data reload refreshes recipe book entries after changes.
-- Custom payloads sync metadata and processed PNGs to clients. The client invalidates cached creative tabs and reloads atlases.
+- Custom payloads sync metadata and processed PNGs to clients. A client-ready sync request and channel-registration sync avoid the Fabric login race; duplicate snapshots are ignored. The client invalidates cached creative tabs, reloads atlases, and verifies that every occupied slot exists in both the painting and item atlases.
 - `SpriteLoader` hooks add custom sprites to the painting and item atlases without replacing vanilla art. GUI previews use official 26.3 `DynamicTexture`.
 - A painting mixin makes custom variants drop and pick-block as their own item instead of a generic vanilla painting.
 
@@ -78,7 +78,7 @@ Install a full **JDK 25**, then:
 Outputs:
 
 ```text
-build/libs/custompaintings-1.2.0.jar
+build/libs/custompaintings-1.2.1.jar
 build/libs/custompaintings-1.2.0-sources.jar
 ```
 

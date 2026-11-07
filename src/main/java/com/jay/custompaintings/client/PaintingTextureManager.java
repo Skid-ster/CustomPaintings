@@ -136,7 +136,36 @@ public final class PaintingTextureManager {
                 CustomPaintingsMod.LOGGER.warn("Could not register preview for slot {}", image.entry().slot(), exception);
             }
         }
-        current = prepared;
+        String atlasError = verifyAtlasSprites(prepared);
+        current = new Snapshot(prepared.images(), atlasError, prepared.generation());
+        if (atlasError != null) {
+            CustomPaintingsMod.LOGGER.error("Custom painting atlas verification failed: {}", atlasError);
+        } else if (!prepared.images().isEmpty()) {
+            CustomPaintingsMod.LOGGER.info("Installed and verified {} custom painting/item sprite(s)", prepared.loadedCount());
+        }
+    }
+
+    /** Detects a missing atlas entry instead of silently rendering Minecraft's checkerboard. */
+    private String verifyAtlasSprites(Snapshot prepared) {
+        var atlases = Minecraft.getInstance().getAtlasManager();
+        var paintings = atlases.getAtlasOrThrow(AtlasIds.PAINTINGS);
+        var items = atlases.getAtlasOrThrow(AtlasIds.ITEMS);
+        List<String> missing = new ArrayList<>();
+        for (LoadedImage image : prepared.images()) {
+            if (!image.successful()) {
+                continue;
+            }
+            PaintingEntry entry = image.entry();
+            Identifier paintingId = PaintingRuntime.variantAssetId(entry.slot(), entry.width(), entry.height());
+            Identifier itemId = PaintingRuntime.itemTextureId(entry.slot());
+            if (paintings.getSprite(paintingId) == paintings.missingSprite()) {
+                missing.add(paintingId.toString());
+            }
+            if (items.getSprite(itemId) == items.missingSprite()) {
+                missing.add(itemId.toString());
+            }
+        }
+        return missing.isEmpty() ? null : "Missing atlas sprites: " + String.join(", ", missing);
     }
 
     public void close() {

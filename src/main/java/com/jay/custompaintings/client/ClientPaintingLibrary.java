@@ -36,16 +36,22 @@ public final class ClientPaintingLibrary {
         return Optional.ofNullable(images.get(slot));
     }
 
-    public void apply(PaintingPayloads.Sync sync) {
+    /** Returns false for duplicate syncs so join/channel-registration/mutation events do not reload repeatedly. */
+    public boolean apply(PaintingPayloads.Sync sync) {
+        PaintingLibrary updatedLibrary = sync.library();
+        if (synced && canEdit == sync.canEdit() && library.equals(updatedLibrary)) {
+            return false;
+        }
         Map<Integer, byte[]> updated = new HashMap<>();
         for (PaintingPayloads.EntryData entry : sync.entries()) {
             updated.put(entry.slot(), entry.png());
         }
-        library = sync.library();
+        library = updatedLibrary;
         images = Map.copyOf(updated);
         canEdit = sync.canEdit();
         synced = true;
         generation++;
+        return true;
     }
 
     public void clear() {
