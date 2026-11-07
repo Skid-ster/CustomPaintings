@@ -165,7 +165,8 @@ class ImageImporterTest {
     }
 
     private static Path image(Path path, String format, int color) throws IOException {
-        BufferedImage image = new BufferedImage(8, 8, BufferedImage.TYPE_INT_ARGB);
+        int type = format.equals("jpg") ? BufferedImage.TYPE_INT_RGB : BufferedImage.TYPE_INT_ARGB;
+        BufferedImage image = new BufferedImage(8, 8, type);
         for (int y = 0; y < 8; y++) {
             for (int x = 0; x < 8; x++) {
                 image.setRGB(x, y, color);
