@@ -57,6 +57,31 @@ tasks.named('test', Test) {
     useJUnitPlatform()
 }
 
+// Separate client-only source set so regression tests never ship in the release JAR.
+// `build` remains headless/unit-test only; CI runs `runClientGameTest` as an explicit in-game job.
+fabricApi {
+    configureTests {
+        createSourceSet = true
+        modId = 'custompaintings-gametest'
+        enableGameTests = false
+        enableClientGameTests = true
+        clearRunDirectory = true
+    }
+}
+
+dependencies {
+    gametestImplementation fabricApi.module('fabric-client-gametest-api-v1', project.fabric_api_version)
+}
+
+tasks.named('runClientGameTest') {
+    doFirst {
+        // Minecraft 26.3 can default to Vulkan; force the software OpenGL path used by CI.
+        def runDir = file('build/run/clientGameTest')
+        runDir.mkdirs()
+        new File(runDir, 'options.txt').text = 'version:4896\npreferredGraphicsBackend:"opengl"\n'
+    }
+}
+
 jar {
     from('LICENSE') {
         rename { "${it}_${project.base.archivesName.get()}" }

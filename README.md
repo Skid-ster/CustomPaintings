@@ -22,7 +22,7 @@ The build uses **`net.fabricmc.fabric-loom`**, not the legacy/remapping plugin. 
 ## Install and use
 
 1. Install Fabric Loader **0.19.5** for Minecraft **26.3**, using **Java 25**.
-2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.2.2.jar` into the **client** mods folder. For multiplayer, install the mod and Fabric API on the **server** too.
+2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.2.3.jar` into the **client** mods folder. For multiplayer, install the mod and Fabric API on the **server** too.
 3. Launch the game, open **Mods → Custom Paintings → Configure**, and choose **Upload Images**.
 4. Select `.png`, `.jpg`, or `.jpeg` files, or drag them onto the screen. Each image becomes a new custom painting in the first free slot.
 5. Wait for upload, server data reload, and texture reload. The screen shows previews, names, sizes, and assigned recipes.
@@ -64,7 +64,7 @@ Clients keep synchronized images in memory for atlas/preview reloads. **Open Loc
 - Ten stable custom items are registered at startup. A built-in data pack registers the fixed slot/size painting variants and slot recipes, avoiding unsafe mutation of frozen dynamic registries while a world runs.
 - The server library controls which slots are occupied. Recipe matches/displays and creative entries follow the library; a server data reload refreshes recipe book entries after changes.
 - Custom payloads sync metadata and processed PNGs to clients. A client-ready sync request and channel-registration sync avoid the Fabric login race; duplicate snapshots are ignored. The client invalidates cached creative tabs, reloads atlases, and verifies that every occupied slot exists in both the painting and item atlases.
-- `SpriteLoader` hooks add custom sprites to the painting and item atlases without replacing vanilla art. GUI previews use official 26.3 `DynamicTexture`.
+- `SpriteLoader` hooks add custom sprites to the painting and item atlases without replacing vanilla art. The hook matches the atlas **sheet texture ids** (`minecraft:textures/atlas/paintings.png` and `minecraft:textures/atlas/items.png`), which is the id space `SpriteLoader` actually exposes; atlas verification/rendering uses the separate definition ids (`minecraft:paintings` / `minecraft:items`). GUI previews use official 26.3 `DynamicTexture`.
 - A painting mixin makes custom variants drop and pick-block as their own item instead of a generic vanilla painting.
 
 ## Build locally
@@ -78,8 +78,8 @@ Install a full **JDK 25**, then:
 Outputs:
 
 ```text
-build/libs/custompaintings-1.2.2.jar
-build/libs/custompaintings-1.2.0-sources.jar
+build/libs/custompaintings-1.2.3.jar
+build/libs/custompaintings-1.2.3-sources.jar
 ```
 
 Install the non-sources JAR. The first build needs Fabric Maven, Mojang libraries, Maven Central, and TerraformersMC Maven. For a development client, run `./gradlew runClient`.
@@ -88,9 +88,15 @@ Install the non-sources JAR. The first build needs Fabric Maven, Mojang librarie
 
 `./gradlew build` runs JUnit tests for image decoding/validation/resizing, importer safety, the bounded library, persistence, rename/resize/remove, recipe uniqueness, and slot caps. These tests do not launch Minecraft or require a GPU.
 
-GitHub Actions builds on pushes to `main`, session branches, tags, and pull requests. Successful `main` builds automatically publish a GitHub Release for the current `mod_version` unless that release already exists. Existing releases are never overwritten; bump `mod_version` for each release.
+There is also a separate **client gametest** source set under `src/gametest`. It launches Minecraft, uploads a generated test image, asserts that the painting and item atlas sprites are present, places a painting and checks screenshot pixels, resizes/removes it, relogs into the saved world, and triggers a manual resource reload. Run it locally with a display (or CI's headless Xvfb setup):
 
-A successful compile is not an in-game smoke test. Before distributing, verify upload/picker/drag-drop, previews, rename, creative entries, crafting, placement, drop/pick-block, multiplayer sync, and several sizes on the target desktop OS.
+```bash
+./gradlew runClientGameTest
+```
+
+GitHub Actions builds on pushes to `main`, session branches, tags, and pull requests. The workflow has a separate in-game client rendering job; releases require both the headless build/unit tests and that client gametest to pass. Successful `main` builds automatically publish a GitHub Release for the current `mod_version` unless that release already exists. Existing releases are never overwritten; bump `mod_version` for each release.
+
+The automated client test is a rendering regression test, not a substitute for all desktop smoke testing. Before distributing, also verify the native picker/drag-drop, previews, rename, creative entries, crafting, drop/pick-block, multiplayer sync, and several sizes on the target desktop OS.
 
 ## License
 
