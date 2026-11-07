@@ -10,7 +10,7 @@ import com.mojang.serialization.codecs.RecordCodecBuilder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
+
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.item.ItemStack;
@@ -40,7 +40,8 @@ public final class CustomPaintingRecipe implements CraftingRecipe {
             Codec.intRange(0, PaintingEntry.MAX_PAINTINGS - 1).fieldOf("slot").forGetter(recipe -> recipe.slot)
     ).apply(instance, CustomPaintingRecipe::new));
     public static final StreamCodec<RegistryFriendlyByteBuf, CustomPaintingRecipe> STREAM_CODEC =
-            ByteBufCodecs.VAR_INT.map(CustomPaintingRecipe::new, recipe -> recipe.slot);
+            StreamCodec.of((buf, recipe) -> buf.writeVarInt(recipe.slot),
+                    buf -> new CustomPaintingRecipe(buf.readVarInt()));
     public static final RecipeSerializer<CustomPaintingRecipe> SERIALIZER = new RecipeSerializer<>(MAP_CODEC, STREAM_CODEC);
 
     private final int slot;

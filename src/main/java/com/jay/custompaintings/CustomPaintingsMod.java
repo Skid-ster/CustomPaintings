@@ -64,9 +64,11 @@ public final class CustomPaintingsMod implements ModInitializer {
         PaintingPayloads.register();
         PaintingServerNetwork.register();
 
+        // Default built-in pack path: resourcepacks/library. It contains data only,
+        // so ResourceLoader registers the server-data side.
         FabricLoader.getInstance().getModContainer(MOD_ID).ifPresent(container ->
-                ResourceLoader.registerBuiltinPack(id("library"), "data/custompaintings/datapacks/library",
-                        container, Component.translatable("pack.custompaintings.library"), PackActivationType.ALWAYS_ENABLED));
+                ResourceLoader.registerBuiltinPack(id("library"), container,
+                        Component.translatable("pack.custompaintings.library"), PackActivationType.ALWAYS_ENABLED));
 
         Registry.register(BuiltInRegistries.CREATIVE_MODE_TAB, CUSTOM_TAB, FabricCreativeModeTab.builder()
                 .title(Component.translatable("itemGroup.custompaintings"))
