@@ -105,11 +105,10 @@ public final class EditPaintingScreen extends Screen {
         try {
             String name = PaintingEntry.normalizeName(nameBox.getValue());
             PaintingSizes.Size size = PaintingSizes.of(widthSlider.blocks(), heightSlider.blocks());
-            if (CustomPaintingsClient.imports().adjust(entry.slot(), name, size, fitButton.getValue())) {
-                onClose();
-            } else {
-                error = Component.translatable("config.custompaintings.import.busy").getString();
-            }
+            // Stage locally only. The server mutation/atlas reload happens when Apply is pressed.
+            PaintingEntry staged = entry.withName(name).withSize(size.width(), size.height()).withFit(fitButton.getValue());
+            CustomPaintingsClient.drafts().stage(staged);
+            onClose();
         } catch (IllegalArgumentException exception) {
             error = exception.getMessage();
         }

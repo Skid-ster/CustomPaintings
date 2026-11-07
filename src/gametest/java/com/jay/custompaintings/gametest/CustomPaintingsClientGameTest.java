@@ -144,9 +144,69 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             context.waitTicks(20);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-8x8-fill"));
 
-            adjust(context, 0, "Large Mural", 8, 8, ImageFit.STRETCH);
-            waitForEntry(context, 0, 1, 8, 8, ImageFit.STRETCH);
+            // v1.4: stage edits across several paintings, prove nothing reloads/applies yet,
+            // then apply the whole batch together and verify both slots update from one sync.
+            upload(context, sourceImage);
+            waitForEntry(context, 1, 2, 2, 2, ImageFit.FIT);
+            assertSprites(context, 1, 2, 2);
+            context.waitTicks(40);
+            long generationBeforeDrafts = CustomPaintingsClient.paintings().snapshot().generation();
+            long revisionBeforeDrafts = CustomPaintingsClient.library().library().revision();
+            context.runOnClient(client -> {
+                var library = CustomPaintingsClient.library().library();
+                var drafts = CustomPaintingsClient.drafts();
+                drafts.stage(library.get(0).orElseThrow().withName("Batch Mural")
+                        .withSize(8, 8).withFit(ImageFit.STRETCH));
+                drafts.stage(library.get(1).orElseThrow().withName("Batch Two")
+                        .withSize(4, 2).withFit(ImageFit.FILL));
+                if (drafts.changeCount(library) != 2) {
+                    throw new AssertionError("Expected two staged painting edits");
+                }
+                drafts.stage(library.get(1).orElseThrow().withName("Discarded"));
+                drafts.discardSlot(1);
+                drafts.stage(library.get(1).orElseThrow().withName("Batch Two")
+                        .withSize(4, 2).withFit(ImageFit.FILL));
+            });
+            context.waitTicks(20);
+            context.runOnClient(client -> {
+                if (CustomPaintingsClient.paintings().snapshot().generation() != generationBeforeDrafts) {
+                    throw new AssertionError("Staging drafts must not reload client textures");
+                }
+                var library = CustomPaintingsClient.library().library();
+                if (library.revision() != revisionBeforeDrafts) {
+                    throw new AssertionError("Staging drafts must not change the authoritative revision");
+                }
+                if (library.get(0).orElseThrow().fit() != ImageFit.FILL
+                        || library.get(1).orElseThrow().width() != 2) {
+                    throw new AssertionError("Staging drafts must not mutate the applied library");
+                }
+            });
+            context.runOnClient(client -> {
+                if (!CustomPaintingsClient.imports().applyDrafts()) {
+                    throw new AssertionError("Apply batch did not start");
+                }
+            });
+            waitForEntry(context, 0, 2, 8, 8, ImageFit.STRETCH);
+            waitForEntry(context, 1, 2, 4, 2, ImageFit.FILL);
             assertSprites(context, 0, 8, 8);
+            assertSprites(context, 1, 4, 2);
+            context.runOnClient(client -> {
+                if (CustomPaintingsClient.paintings().snapshot().generation() != generationBeforeDrafts + 1) {
+                    throw new AssertionError("Apply batch should coalesce into exactly one client atlas reload");
+                }
+                if (CustomPaintingsClient.library().library().revision() != revisionBeforeDrafts + 1) {
+                    throw new AssertionError("Apply batch should save exactly one authoritative revision");
+                }
+                if (CustomPaintingsClient.drafts().hasChanges(CustomPaintingsClient.library().library())) {
+                    throw new AssertionError("Successful Apply should clear staged drafts");
+                }
+            });
+            context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting painting
+                    && painting.getVariant().unwrapKey()
+                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(0, 8, 8)))
+                    .orElse(false), TIMEOUT_TICKS);
+            context.waitTicks(20);
+            assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-batch-apply"));
         }
     }
 

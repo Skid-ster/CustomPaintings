@@ -4,6 +4,7 @@ import com.jay.custompaintings.CustomPaintingsMod;
 import com.jay.custompaintings.image.ImageFit;
 import com.jay.custompaintings.image.ImageImporter;
 import com.jay.custompaintings.image.ImageProcessor;
+import com.jay.custompaintings.library.PaintingEdit;
 import com.jay.custompaintings.library.PaintingLibraryStore;
 import com.jay.custompaintings.library.PaintingSizes;
 import com.jay.custompaintings.network.PaintingPayloads;
@@ -25,16 +26,18 @@ import java.util.concurrent.atomic.AtomicReference;
 /** One bounded client operation at a time; the server remains authoritative and broadcasts syncs. */
 public final class PaintingImportService {
     private final ClientPaintingLibrary library;
+    private final PaintingDrafts drafts;
     private final AtomicReference<State> state = new AtomicReference<>(State.idle());
     private final AtomicLong requestIds = new AtomicLong();
     private final Map<Long, CompletableFuture<PaintingPayloads.Result>> pending = new ConcurrentHashMap<>();
     private final Object lock = new Object();
 
-    public PaintingImportService(ClientPaintingLibrary library) {
+    public PaintingImportService(ClientPaintingLibrary library, PaintingDrafts drafts) {
         this.library = library;
+        this.drafts = drafts;
     }
 
-    public enum Phase { IDLE, IMPORTING, REMOVING, RELOADING, FINISHED, FAILED }
+    public enum Phase { IDLE, IMPORTING, APPLYING, REMOVING, RELOADING, FINISHED, FAILED }
 
     public record State(Phase phase, int completed, int total, String currentFile,
                         ImageImporter.Report report, String error) {
@@ -43,7 +46,8 @@ public final class PaintingImportService {
         }
 
         public boolean busy() {
-            return phase == Phase.IMPORTING || phase == Phase.REMOVING || phase == Phase.RELOADING;
+            return phase == Phase.IMPORTING || phase == Phase.APPLYING
+                    || phase == Phase.REMOVING || phase == Phase.RELOADING;
         }
     }
 
@@ -91,6 +95,9 @@ public final class PaintingImportService {
 
     private ImageImporter.Report uploadBatch(List<Path> files, PaintingSizes.Size size, ImageFit fit) {
         List<ImageImporter.Result> results = new ArrayList<>();
+        List<PaintingPayloads.UploadData> uploads = new ArrayList<>();
+        List<String> uploadNames = new ArrayList<>();
+        List<String> uploadSources = new ArrayList<>();
         int completed = 0;
         for (Path file : files) {
             String sourceName = file.getFileName().toString();
@@ -100,19 +107,30 @@ public final class PaintingImportService {
                 byte[] png = PaintingLibraryStore.encodePng(ImageProcessor.prepareMaster(image));
                 PaintingSizes.Size target = size == null ? PaintingSizes.auto(image.getWidth(), image.getHeight()) : size;
                 String name = defaultName(sourceName);
-                PaintingPayloads.Result result = request(new PaintingPayloads.Upload(
-                        requestIds.incrementAndGet(), name, target.width(), target.height(), fit.id(), png));
-                if (result.success()) {
-                    results.add(new ImageImporter.Result(sourceName, name, ImageImporter.Status.IMPORTED, result.message()));
-                } else {
-                    results.add(new ImageImporter.Result(sourceName, null, ImageImporter.Status.FAILED, result.message()));
-                }
+                uploads.add(new PaintingPayloads.UploadData(name, target.width(), target.height(), fit.id(), png));
+                uploadNames.add(name);
+                uploadSources.add(sourceName);
             } catch (Exception exception) {
                 results.add(new ImageImporter.Result(sourceName, null, ImageImporter.Status.FAILED,
                         exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage()));
             }
             completed++;
             state.set(new State(Phase.IMPORTING, completed, files.size(), sourceName, null, null));
+        }
+        if (!uploads.isEmpty()) {
+            // One request for the whole selected batch: one server mutation, one manifest save,
+            // one authoritative sync, and one coalesced client atlas reload.
+            PaintingPayloads.Result result = request(new PaintingPayloads.UploadBatch(requestIds.incrementAndGet(), uploads));
+            for (int i = 0; i < uploads.size(); i++) {
+                String sourceName = uploadSources.get(i);
+                if (result.success()) {
+                    results.add(new ImageImporter.Result(sourceName, uploadNames.get(i),
+                            ImageImporter.Status.IMPORTED, result.message()));
+                } else {
+                    results.add(new ImageImporter.Result(sourceName, null,
+                            ImageImporter.Status.FAILED, result.message()));
+                }
+            }
         }
         return new ImageImporter.Report(results);
     }
@@ -151,7 +169,34 @@ public final class PaintingImportService {
         return simpleOperation(Phase.REMOVING, new PaintingPayloads.Remove(requestIds.incrementAndGet(), slot));
     }
 
+    /** Apply every staged draft edit/removal together. Nothing is sent until this is called. */
+    public boolean applyDrafts() {
+        var current = library.library();
+        List<PaintingEdit> edits = drafts.changes(current);
+        List<Integer> removals = drafts.removals(current);
+        if (edits.isEmpty() && removals.isEmpty()) {
+            return false;
+        }
+        List<PaintingPayloads.EditData> data = edits.stream().map(PaintingPayloads.EditData::from).toList();
+        return simpleOperation(Phase.APPLYING, new PaintingPayloads.ApplyBatch(
+                requestIds.incrementAndGet(), current.revision(), data, removals), drafts::discard);
+    }
+
+    public boolean applyDrafts(List<PaintingEdit> edits, List<Integer> removals) {
+        if (edits.isEmpty() && removals.isEmpty()) {
+            return false;
+        }
+        List<PaintingPayloads.EditData> data = edits.stream().map(PaintingPayloads.EditData::from).toList();
+        return simpleOperation(Phase.APPLYING, new PaintingPayloads.ApplyBatch(
+                requestIds.incrementAndGet(), library.library().revision(), data, List.copyOf(removals)));
+    }
+
     private boolean simpleOperation(Phase phase, net.minecraft.network.protocol.common.custom.CustomPacketPayload payload) {
+        return simpleOperation(phase, payload, () -> { });
+    }
+
+    private boolean simpleOperation(Phase phase, net.minecraft.network.protocol.common.custom.CustomPacketPayload payload,
+                                    Runnable onSuccess) {
         if (!library.canEdit()) {
             return false;
         }
@@ -168,6 +213,7 @@ public final class PaintingImportService {
                     } else if (!result.success()) {
                         state.set(new State(Phase.FAILED, 1, 1, "", null, result.message()));
                     } else {
+                        onSuccess.run();
                         // The authoritative sync handler already schedules one client resource reload.
                         state.set(new State(Phase.FINISHED, 1, 1, "", null, null));
                     }
@@ -178,6 +224,8 @@ public final class PaintingImportService {
     private PaintingPayloads.Result request(net.minecraft.network.protocol.common.custom.CustomPacketPayload payload) {
         long id = switch (payload) {
             case PaintingPayloads.Upload upload -> upload.requestId();
+            case PaintingPayloads.UploadBatch upload -> upload.requestId();
+            case PaintingPayloads.ApplyBatch apply -> apply.requestId();
             case PaintingPayloads.Rename rename -> rename.requestId();
             case PaintingPayloads.Adjust adjust -> adjust.requestId();
             case PaintingPayloads.Remove remove -> remove.requestId();

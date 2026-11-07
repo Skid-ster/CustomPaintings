@@ -34,6 +34,31 @@ public final class PaintingServerNetwork {
                     PaintingServerState.store().add(payload.name(), payload.width(), payload.height(), ImageFit.fromId(payload.fit()), payload.png());
                     return "Painting added";
                 }));
+        ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.UploadBatch.TYPE, (payload, context) ->
+                mutate(context.server(), context.player(), payload.requestId(), () -> {
+                    List<com.jay.custompaintings.library.PaintingLibraryStore.Upload> uploads = payload.images().stream()
+                            .map(image -> new com.jay.custompaintings.library.PaintingLibraryStore.Upload(
+                                    image.name(), image.width(), image.height(), ImageFit.fromId(image.fit()), image.png()))
+                            .toList();
+                    int added = PaintingServerState.store().addBatch(uploads).size();
+                    return added + " painting(s) added";
+                }));
+        ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.ApplyBatch.TYPE, (payload, context) ->
+                mutate(context.server(), context.player(), payload.requestId(), () -> {
+                    List<com.jay.custompaintings.library.PaintingEdit> edits = payload.edits().stream()
+                            .map(PaintingPayloads.EditData::edit).toList();
+                    PaintingServerState.store().applyBatch(payload.expectedRevision(), edits, payload.removals());
+                    int changes = edits.size() + payload.removals().size();
+                    return changes + " staged change(s) applied";
+                }, () -> {
+                    for (PaintingPayloads.EditData edit : payload.edits()) {
+                        renamePlacedPaintings(context.server(), edit.slot(), edit.name());
+                        resizePlacedPaintings(context.server(), edit.slot(), edit.width(), edit.height());
+                    }
+                    for (int slot : payload.removals()) {
+                        removePlacedPaintings(context.server(), slot);
+                    }
+                }, !payload.removals().isEmpty()));
         ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.Rename.TYPE, (payload, context) ->
                 mutate(context.server(), context.player(), payload.requestId(), () -> {
                     PaintingServerState.store().rename(payload.slot(), payload.name());
@@ -97,6 +122,11 @@ public final class PaintingServerNetwork {
 
     private static void mutate(MinecraftServer server, ServerPlayer player, long requestId,
                                Mutation mutation, Runnable afterSuccess) {
+        mutate(server, player, requestId, mutation, afterSuccess, true);
+    }
+
+    private static void mutate(MinecraftServer server, ServerPlayer player, long requestId,
+                               Mutation mutation, Runnable afterSuccess, boolean reloadData) {
         if (!canEdit(player)) {
             ServerPlayNetworking.send(player, new PaintingPayloads.Result(requestId, false,
                     "Only the singleplayer owner or a server operator can edit paintings"));
@@ -120,6 +150,11 @@ public final class PaintingServerNetwork {
                 return CompletableFuture.completedFuture(message);
             }
             afterSuccess.run();
+            if (!reloadData) {
+                // Metadata-only batches do not change recipe/variant occupancy. The 640 variants
+                // are pre-registered and recipes read the live library, so one sync is enough.
+                return CompletableFuture.completedFuture(message);
+            }
             return server.reloadResources(server.getPackRepository().getSelectedIds())
                     .thenApply(ignored -> message)
                     .exceptionally(exception -> {
