@@ -58,7 +58,7 @@ class ImageImporterTest {
         assertEquals(1, changed.importedCount());
         assertEquals("art-1.png", changed.results().getFirst().fileName());
         assertArrayEquals(original, Files.readAllBytes(target.resolve("art.png")));
-        assertEquals(0xFF00FF00, ImageIO.read(target.resolve("art-1.png")).getRGB(0, 0));
+        assertEquals(0xFF00FF00, ImageIO.read(target.resolve("art-1.png").toFile()).getRGB(0, 0));
     }
 
     @Test
