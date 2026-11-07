@@ -390,7 +390,7 @@ public final class CustomPaintingsScreen extends Screen {
                     RecipeCatalog.get(entry.recipeId()).label());
             PaintingEntry applied = CustomPaintingsClient.library().library().get(slot).orElse(null);
             if (applied != null && !applied.equals(entry)) {
-                return base.append(Component.translatable("config.custompaintings.draft.pendingSuffix"));
+                return Component.literal(base.getString()).append(Component.translatable("config.custompaintings.draft.pendingSuffix"));
             }
             return base;
         }
