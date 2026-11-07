@@ -115,7 +115,16 @@ For a development client, run `./gradlew runClient`. Its game directory is `run/
 
 `./gradlew build` runs JUnit tests for PNG/JPG decoding, resizing, alpha preservation, malformed-file handling, size validation, deterministic assignment, exact-name overrides, and cycling behavior. These tests do not launch Minecraft or require a GPU.
 
-The GitHub Actions workflow runs on pushes to `main`, session branches, pull requests, and manual dispatch. It uses the requested `actions/checkout@v4`, Temurin Java 25 through `actions/setup-java@v4`, `gradle/actions/setup-gradle@v4`, and `actions/upload-artifact@v4`. Download `custompaintings-jars` from a successful workflow run.
+The GitHub Actions workflow runs on pushes to `main`, session branches, version tags (`v*`), pull requests, and manual dispatch. It uses the requested `actions/checkout@v4`, Temurin Java 25 through `actions/setup-java@v4`, `gradle/actions/setup-gradle@v4`, and `actions/upload-artifact@v4`. Download `custompaintings-jars` from a successful workflow run for temporary CI artifacts.
+
+### GitHub Releases
+
+Permanent JAR releases are published to the repository's **Releases** page, not only as short-lived CI artifacts. The release job runs after a successful build when either:
+
+- a version tag such as `v1.0.0` is pushed, and the tag matches `mod_version` in `gradle.properties`; or
+- the workflow is manually dispatched on `main` with `publish_release` set to `true`.
+
+The release attaches `custompaintings-<version>.jar` and `custompaintings-<version>-sources.jar`. Release tags are immutable: if `v<version>` already exists, bump `mod_version` before publishing another release. Ordinary pushes and pull requests still build and test the mod, but they do not create or overwrite releases.
 
 A successful compilation is not a substitute for an in-game smoke test. Before distributing a build, launch 26.3, add a PNG and JPG, reload, check Mod Menu previews, and place paintings of several aspect ratios.
 
