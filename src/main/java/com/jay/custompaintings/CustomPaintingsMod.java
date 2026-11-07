@@ -30,6 +30,6 @@ public final class CustomPaintingsMod implements ModInitializer {
         } catch (IOException exception) {
             LOGGER.warn("Could not create the image folder; vanilla paintings will remain unchanged", exception);
         }
-        LOGGER.info("Custom Paintings initialized. Put PNG/JPG images in {} and reload resources.", imagesDirectory());
+        LOGGER.info("Custom Paintings initialized. Upload PNG/JPG images through Mod Menu, or put them in {} and reload resources.", imagesDirectory());
     }
 }
