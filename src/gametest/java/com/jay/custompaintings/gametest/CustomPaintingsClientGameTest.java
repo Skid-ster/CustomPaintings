@@ -116,12 +116,16 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-after-resource-reload"));
 
             // v1.3: auto-size from image proportions, preserve alpha, and exercise 8×8 + fit modes.
+            // Remove the persisted 2×2 first so the next painting does not overlap it on the test wall.
+            remove(context, 0);
+            waitForLibrary(context, 0, 0, 0);
+            context.waitFor(client -> client.level.getEntity(persistedPaintingId) == null, TIMEOUT_TICKS);
             Path wideAlpha = createWideAlphaTestImage(context);
             uploadAuto(context, wideAlpha);
-            waitForEntry(context, 1, 2, 2, 1, ImageFit.FIT);
-            assertSprites(context, 1, 2, 1);
-            assertSpriteHasTransparentCenter(context, 1, 2, 1);
-            Painting widePlaced = placePainting(reopened, 1, 2, 1);
+            waitForEntry(context, 0, 1, 2, 1, ImageFit.FIT);
+            assertSprites(context, 0, 2, 1);
+            assertSpriteHasTransparentCenter(context, 0, 2, 1);
+            Painting widePlaced = placePainting(reopened, 0, 2, 1);
             UUID wideId = widePlaced.getUUID();
             reopened.getConnection().waitForClientboundPackets();
             context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting, TIMEOUT_TICKS);
@@ -130,19 +134,19 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             context.waitTicks(20);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-wide-alpha"));
 
-            adjust(context, 1, "Large Mural", 8, 8, ImageFit.FILL);
-            waitForEntry(context, 1, 2, 8, 8, ImageFit.FILL);
-            assertSprites(context, 1, 8, 8);
+            adjust(context, 0, "Large Mural", 8, 8, ImageFit.FILL);
+            waitForEntry(context, 0, 1, 8, 8, ImageFit.FILL);
+            assertSprites(context, 0, 8, 8);
             context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting painting
                     && painting.getVariant().unwrapKey()
-                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(1, 8, 8)))
+                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(0, 8, 8)))
                     .orElse(false), TIMEOUT_TICKS);
             context.waitTicks(20);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-8x8-fill"));
 
-            adjust(context, 1, "Large Mural", 8, 8, ImageFit.STRETCH);
-            waitForEntry(context, 1, 2, 8, 8, ImageFit.STRETCH);
-            assertSprites(context, 1, 8, 8);
+            adjust(context, 0, "Large Mural", 8, 8, ImageFit.STRETCH);
+            waitForEntry(context, 0, 1, 8, 8, ImageFit.STRETCH);
+            assertSprites(context, 0, 8, 8);
         }
     }
 
