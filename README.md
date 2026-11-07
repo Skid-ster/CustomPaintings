@@ -119,12 +119,13 @@ The GitHub Actions workflow runs on pushes to `main`, session branches, version 
 
 ### GitHub Releases
 
-Permanent JAR releases are published to the repository's **Releases** page, not only as short-lived CI artifacts. The release job runs after a successful build when either:
+Permanent JAR releases are published to the repository's **Releases** page, not only as short-lived CI artifacts. The release job runs after a successful build when any of these is true:
 
+- the build is a push to `main`;
 - a version tag such as `v1.0.0` is pushed, and the tag matches `mod_version` in `gradle.properties`; or
 - the workflow is manually dispatched on `main` with `publish_release` set to `true`.
 
-The release attaches `custompaintings-<version>.jar` and `custompaintings-<version>-sources.jar`. Release tags are immutable: if `v<version>` already exists, bump `mod_version` before publishing another release. Ordinary pushes and pull requests still build and test the mod, but they do not create or overwrite releases.
+The release attaches `custompaintings-<version>.jar` and `custompaintings-<version>-sources.jar`. Releases are not overwritten: if `v<version>` already exists, the release job skips publication; bump `mod_version` before publishing another release. Session-branch pushes and pull requests still build and test the mod, but they do not create releases.
 
 A successful compilation is not a substitute for an in-game smoke test. Before distributing a build, launch 26.3, add a PNG and JPG, reload, check Mod Menu previews, and place paintings of several aspect ratios.
 

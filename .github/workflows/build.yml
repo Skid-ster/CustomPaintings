@@ -108,9 +108,11 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: build
-    # Publish permanent releases only from version tags or an explicit main-branch dispatch.
-    # Ordinary pushes/PRs still produce downloadable CI artifacts.
+    # Publish permanent releases from successful main builds, version tags, or an explicit main dispatch.
+    # If the version's release already exists, publication is skipped rather than overwriting assets.
+    # Ordinary session-branch pushes/PRs still produce downloadable CI artifacts only.
     if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' &&
        github.ref == 'refs/heads/main' &&
@@ -154,8 +156,9 @@ jobs:
           fi
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists. Bump mod_version before publishing another release." >&2
-            exit 1
+            echo "Release ${tag} already exists; skipping publication. Bump mod_version to publish a new release."
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           {
@@ -172,11 +175,13 @@ jobs:
             echo "The sources JAR is provided for development/reference only."
           } > release-notes.md
 
+          echo 'skip=false' >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "mod_jar=$mod_jar" >> "$GITHUB_OUTPUT"
           echo "sources_jar=$sources_jar" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
+        if: steps.release.outputs.skip != 'true'
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
