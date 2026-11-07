@@ -188,6 +188,18 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             });
             waitForEntry(context, 0, 2, 8, 8, ImageFit.STRETCH);
             waitForEntry(context, 1, 2, 4, 2, ImageFit.FILL);
+            // The authoritative sync and the post-atlas texture install are separate steps. Wait
+            // for the installed snapshot to contain the applied batch before measuring generations.
+            context.waitFor(client -> {
+                var snapshot = CustomPaintingsClient.paintings().snapshot();
+                return snapshot.generation() > generationBeforeDrafts && snapshot.error() == null
+                        && snapshot.images().stream().anyMatch(image -> image.successful()
+                        && image.entry().slot() == 0 && image.entry().width() == 8
+                        && image.entry().height() == 8 && image.entry().fit() == ImageFit.STRETCH)
+                        && snapshot.images().stream().anyMatch(image -> image.successful()
+                        && image.entry().slot() == 1 && image.entry().width() == 4
+                        && image.entry().height() == 2 && image.entry().fit() == ImageFit.FILL);
+            }, TIMEOUT_TICKS);
             assertSprites(context, 0, 8, 8);
             assertSprites(context, 1, 4, 2);
             context.runOnClient(client -> {
@@ -333,7 +345,14 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
     }
 
     private static void assertSprites(ClientGameTestContext context, int slot, int width, int height) {
-        context.waitFor(client -> hasSprites(client, slot, width, height), TIMEOUT_TICKS);
+        // Atlas sprites can exist before Custom Paintings' post-atlas listener installs previews
+        // and publishes the new texture snapshot. Wait for that snapshot too, otherwise generation
+        // assertions race the very reload they are trying to measure.
+        context.waitFor(client -> hasSprites(client, slot, width, height)
+                && CustomPaintingsClient.paintings().snapshot().error() == null
+                && CustomPaintingsClient.paintings().snapshot().images().stream()
+                .anyMatch(image -> image.successful() && image.entry().slot() == slot
+                        && image.entry().width() == width && image.entry().height() == height), TIMEOUT_TICKS);
         context.runOnClient(client -> {
             String error = CustomPaintingsClient.paintings().snapshot().error();
             if (error != null) {
