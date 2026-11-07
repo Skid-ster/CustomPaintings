@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "custompaintings-gametest",
+  "version": "1.0.0",
+  "name": "Custom Paintings Client Game Tests",
+  "description": "In-game regression tests for uploaded painting and item textures.",
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-client-gametest": [
+      "com.jay.custompaintings.gametest.CustomPaintingsClientGameTest"
+    ]
+  },
+  "depends": {
+    "custompaintings": "*",
+    "fabric-client-gametest-api-v1": "*"
+  }
+}

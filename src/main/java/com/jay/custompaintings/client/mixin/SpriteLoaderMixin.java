@@ -2,9 +2,10 @@ package com.jay.custompaintings.client.mixin;
 
 import com.jay.custompaintings.client.CustomPaintingsClient;
 import com.jay.custompaintings.client.PaintingTextureManager;
+import net.minecraft.client.renderer.Sheets;
 import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.SpriteLoader;
-import net.minecraft.data.AtlasIds;
+import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.resources.Identifier;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -28,9 +29,17 @@ public abstract class SpriteLoaderMixin {
     @ModifyVariable(method = "stitch", at = @At("HEAD"), argsOnly = true, ordinal = 0)
     private List<SpriteContents> custompaintings$replacePaintingPixels(List<SpriteContents> sprites) {
         PaintingTextureManager manager = CustomPaintingsClient.paintings();
-        if (manager == null || (!this.location.equals(AtlasIds.PAINTINGS) && !this.location.equals(AtlasIds.ITEMS))) {
+        if (manager == null) {
             return sprites;
         }
-        return manager.prepareSprites(sprites, this.location);
+        // SpriteLoader.location is the atlas TEXTURE id (minecraft:textures/atlas/paintings.png),
+        // not the atlas definition id (minecraft:paintings). Comparing against AtlasIds here
+        // silently skipped every injection and produced missing textures for items and paintings.
+        boolean paintings = this.location.equals(Sheets.PAINTINGS_SHEET);
+        boolean items = this.location.equals(TextureAtlas.LOCATION_ITEMS);
+        if (!paintings && !items) {
+            return sprites;
+        }
+        return manager.prepareSprites(sprites, paintings);
     }
 }

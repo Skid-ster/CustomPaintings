@@ -65,12 +65,7 @@ public final class PaintingTextureManager {
     }
 
     /** Called by SpriteLoaderMixin for both the painting and item atlases before stitching. */
-    public synchronized List<SpriteContents> prepareSprites(List<SpriteContents> originals, Identifier atlasId) {
-        boolean paintings = atlasId.equals(AtlasIds.PAINTINGS);
-        boolean items = atlasId.equals(AtlasIds.ITEMS);
-        if (!paintings && !items) {
-            return originals;
-        }
+    public synchronized List<SpriteContents> prepareSprites(List<SpriteContents> originals, boolean paintings) {
         List<LoadedImage> loaded = new ArrayList<>();
         Map<String, SpriteContents> byName = new LinkedHashMap<>();
         for (SpriteContents original : originals) {
@@ -114,6 +109,9 @@ public final class PaintingTextureManager {
         if (paintings) {
             pending = new Snapshot(loaded, null, generation.incrementAndGet());
         }
+        CustomPaintingsMod.LOGGER.info("Injected {} custom sprite(s) into {} atlas (library size {})",
+                loaded.stream().filter(LoadedImage::successful).count(), paintings ? "painting" : "item",
+                library.library().count());
         return List.copyOf(byName.values());
     }
 
