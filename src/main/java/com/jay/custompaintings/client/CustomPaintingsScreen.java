@@ -88,7 +88,7 @@ public final class CustomPaintingsScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.setScreen(parent);
+        this.minecraft.gui.setScreen(parent);
     }
 
     private static final class ImageList extends ObjectSelectionList<ImageEntry> {
