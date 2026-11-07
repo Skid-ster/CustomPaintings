@@ -28,7 +28,7 @@ class PaintingAssetIdsTest {
                 checked++;
             }
         }
-        assertEquals(80, checked);
+        assertEquals(640, checked);
     }
 
     @Test

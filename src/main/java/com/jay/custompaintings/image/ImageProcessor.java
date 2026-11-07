@@ -100,7 +100,16 @@ public final class ImageProcessor {
 
     /** Stretch to the exact canvas size, retaining PNG alpha and making JPEG pixels opaque. */
     public static Pixels resize(BufferedImage source, int width, int height) {
-        if (source == null || width <= 0 || height <= 0 || (long) width * height > MAX_OUTPUT_PIXELS) {
+        return compose(source, width, height, ImageFit.STRETCH);
+    }
+
+    /**
+     * Compose a master image onto a canvas. FIT preserves the whole image and leaves
+     * unused canvas transparent; FILL preserves proportions and crops excess; STRETCH
+     * fills the canvas exactly. Alpha is never flattened against a background color.
+     */
+    public static Pixels compose(BufferedImage source, int width, int height, ImageFit fit) {
+        if (source == null || fit == null || width <= 0 || height <= 0 || (long) width * height > MAX_OUTPUT_PIXELS) {
             throw new IllegalArgumentException("Invalid source or target dimensions (maximum 1,048,576 output pixels)");
         }
         BufferedImage output = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
@@ -109,11 +118,45 @@ public final class ImageProcessor {
             graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
             graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
             graphics.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION, RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
-            graphics.drawImage(source, 0, 0, width, height, null);
+            graphics.setComposite(java.awt.AlphaComposite.SrcOver);
+            graphics.setClip(0, 0, width, height);
+            double sourceWidth = source.getWidth();
+            double sourceHeight = source.getHeight();
+            double scale = switch (fit) {
+                case FIT -> Math.min(width / sourceWidth, height / sourceHeight);
+                case FILL -> Math.max(width / sourceWidth, height / sourceHeight);
+                case STRETCH -> 1.0;
+            };
+            int drawWidth = fit == ImageFit.STRETCH ? width : Math.max(1, (int) Math.round(sourceWidth * scale));
+            int drawHeight = fit == ImageFit.STRETCH ? height : Math.max(1, (int) Math.round(sourceHeight * scale));
+            int x = (width - drawWidth) / 2;
+            int y = (height - drawHeight) / 2;
+            graphics.drawImage(source, x, y, drawWidth, drawHeight, null);
         } finally {
             graphics.dispose();
         }
         return new Pixels(width, height, output.getRGB(0, 0, width, height, null, 0, width));
+    }
+
+    /** Downscale only when needed, preserving aspect ratio and alpha, to a bounded sync/storage master. */
+    public static Pixels prepareMaster(BufferedImage source) {
+        if (source == null || source.getWidth() <= 0 || source.getHeight() <= 0) {
+            throw new IllegalArgumentException("Invalid source image");
+        }
+        double scale = Math.min(1.0, Math.sqrt((double) MAX_OUTPUT_PIXELS / ((long) source.getWidth() * source.getHeight())));
+        scale = Math.min(scale, 4096.0 / Math.max(source.getWidth(), source.getHeight()));
+        int width = Math.max(1, (int) Math.floor(source.getWidth() * scale));
+        int height = Math.max(1, (int) Math.floor(source.getHeight() * scale));
+        while ((long) width * height > MAX_OUTPUT_PIXELS) {
+            if (width >= height && width > 1) {
+                width--;
+            } else if (height > 1) {
+                height--;
+            } else {
+                break;
+            }
+        }
+        return resize(source, width, height);
     }
 
     public static Pixels load(Path file, int width, int height) throws IOException {

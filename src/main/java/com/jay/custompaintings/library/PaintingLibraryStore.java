@@ -6,6 +6,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.jay.custompaintings.image.ImageFit;
 import com.jay.custompaintings.image.ImageProcessor;
 
 import javax.imageio.ImageIO;
@@ -25,10 +26,17 @@ import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 
-/** Atomic JSON + canonical PNG storage. The server is authoritative; clients receive synced copies. */
+/**
+ * Atomic JSON + canonical master-PNG storage. The server is authoritative; clients receive
+ * aspect-preserving master images and compose the final canvas locally from metadata, so
+ * changing size/fit never re-encodes or degrades the stored artwork.
+ */
 public final class PaintingLibraryStore {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+    private static final int MAX_MASTER_BYTES = 8 * 1024 * 1024;
+    private static final int MAX_MASTER_SIDE = 4096;
     private final Path root;
     private final Path images;
     private final Path manifest;
@@ -71,9 +79,11 @@ public final class PaintingLibraryStore {
             JsonArray array = json.getAsJsonArray("entries");
             for (JsonElement element : array) {
                 JsonObject object = element.getAsJsonObject();
+                // v1.2.x stored an already-stretched canvas and had no fit metadata.
+                ImageFit fit = object.has("fit") ? ImageFit.fromId(object.get("fit").getAsString()) : ImageFit.STRETCH;
                 PaintingEntry entry = new PaintingEntry(
                         object.get("slot").getAsInt(), object.get("name").getAsString(),
-                        object.get("width").getAsInt(), object.get("height").getAsInt(),
+                        object.get("width").getAsInt(), object.get("height").getAsInt(), fit,
                         object.get("image").getAsString(), object.get("sha256").getAsString(),
                         object.get("recipe").getAsString());
                 verifyImage(entry);
@@ -110,10 +120,9 @@ public final class PaintingLibraryStore {
             }
             try {
                 BufferedImage image = ImageProcessor.read(source);
-                byte[] png = encodePng(ImageProcessor.resize(image,
-                        PaintingSizes.DEFAULT.width() * PaintingEntry.TEXTURE_PIXELS_PER_BLOCK,
-                        PaintingSizes.DEFAULT.height() * PaintingEntry.TEXTURE_PIXELS_PER_BLOCK));
-                PaintingEntry entry = writeImage(slot, name, PaintingSizes.DEFAULT.width(), PaintingSizes.DEFAULT.height(),
+                byte[] png = encodePng(ImageProcessor.prepareMaster(image));
+                PaintingSizes.Size size = PaintingSizes.auto(image.getWidth(), image.getHeight());
+                PaintingEntry entry = writeImage(slot, name, size.width(), size.height(), ImageFit.FIT,
                         png, migrated.recipeFor(slot));
                 migrated = migrated.withAdded(entry);
             } catch (IOException | RuntimeException exception) {
@@ -124,12 +133,16 @@ public final class PaintingLibraryStore {
     }
 
     public synchronized PaintingEntry add(String name, int width, int height, byte[] png) throws IOException {
+        return add(name, width, height, ImageFit.FIT, png);
+    }
+
+    public synchronized PaintingEntry add(String name, int width, int height, ImageFit fit, byte[] png) throws IOException {
         if (library.count() == 0 && library.recipeSeed() == 0) {
-            library = new PaintingLibrary(library.revision(), new SecureRandom().nextLong(), java.util.List.of());
+            library = new PaintingLibrary(library.revision(), new SecureRandom().nextLong(), List.of());
         }
         int slot = library.firstFreeSlot().orElseThrow(() -> new IOException("All 10 custom painting slots are full"));
         String recipe = library.recipeFor(slot);
-        PaintingEntry entry = writeImage(slot, name, width, height, png, recipe);
+        PaintingEntry entry = writeImage(slot, name, width, height, fit, png, recipe);
         save(library.withAdded(entry));
         return entry;
     }
@@ -138,15 +151,28 @@ public final class PaintingLibraryStore {
         save(library.withRenamed(slot, name));
     }
 
+    /** Metadata-only resize: the master PNG and its digest are preserved. */
     public synchronized void resize(int slot, int width, int height) throws IOException {
         PaintingEntry entry = library.get(slot).orElseThrow(() -> new IOException("Empty painting slot"));
-        BufferedImage source = ImageProcessor.read(imagePath(entry));
-        byte[] png = encodePng(ImageProcessor.resize(source,
-                width * PaintingEntry.TEXTURE_PIXELS_PER_BLOCK, height * PaintingEntry.TEXTURE_PIXELS_PER_BLOCK));
-        PaintingEntry updated = writeImage(slot, entry.name(), width, height, png, entry.recipeId());
-        List<PaintingEntry> entries = library.entries().stream()
-                .map(existing -> existing.slot() == slot ? updated : existing).toList();
-        save(new PaintingLibrary(library.revision() + 1, library.recipeSeed(), entries));
+        adjust(slot, entry.name(), width, height, entry.fit());
+    }
+
+    public synchronized void setFit(int slot, ImageFit fit) throws IOException {
+        PaintingEntry entry = library.get(slot).orElseThrow(() -> new IOException("Empty painting slot"));
+        adjust(slot, entry.name(), entry.width(), entry.height(), fit);
+    }
+
+    /** Atomic name/size/fit edit used by the in-game editor. */
+    public synchronized void adjust(int slot, String name, int width, int height, ImageFit fit) throws IOException {
+        PaintingEntry entry = library.get(slot).orElseThrow(() -> new IOException("Empty painting slot"));
+        Objects.requireNonNull(fit, "fit");
+        if (!PaintingSizes.isSupported(width, height)) {
+            throw new IOException("Unsupported painting size");
+        }
+        verifyImage(entry);
+        PaintingEntry adjusted = new PaintingEntry(slot, name, width, height, fit,
+                entry.imageFile(), entry.sha256(), entry.recipeId());
+        save(library.withReplaced(adjusted));
     }
 
     public synchronized void remove(int slot) throws IOException {
@@ -155,18 +181,13 @@ public final class PaintingLibraryStore {
         Files.deleteIfExists(imagePath(entry));
     }
 
-    private PaintingEntry writeImage(int slot, String name, int width, int height, byte[] png, String recipe) throws IOException {
+    private PaintingEntry writeImage(int slot, String name, int width, int height, ImageFit fit,
+                                     byte[] png, String recipe) throws IOException {
         if (!PaintingSizes.isSupported(width, height)) {
             throw new IOException("Unsupported painting size");
         }
-        if (png.length == 0 || png.length > ImageProcessor.MAX_FILE_BYTES) {
-            throw new IOException("Invalid processed image size");
-        }
-        BufferedImage decoded = ImageProcessor.readBytes(png, "slot.png");
-        if (decoded.getWidth() != width * PaintingEntry.TEXTURE_PIXELS_PER_BLOCK
-                || decoded.getHeight() != height * PaintingEntry.TEXTURE_PIXELS_PER_BLOCK) {
-            throw new IOException("Processed image dimensions do not match the selected painting size");
-        }
+        Objects.requireNonNull(fit, "fit");
+        validateMaster(png);
         Files.createDirectories(images);
         Path target = images.resolve("slot_" + slot + ".png");
         Path staged = Files.createTempFile(images, ".slot-", ".tmp");
@@ -180,21 +201,39 @@ public final class PaintingLibraryStore {
         } finally {
             Files.deleteIfExists(staged);
         }
-        return new PaintingEntry(slot, name, width, height, target.getFileName().toString(), sha256(png), recipe);
+        return new PaintingEntry(slot, name, width, height, fit, target.getFileName().toString(), sha256(png), recipe);
     }
 
     private void verifyImage(PaintingEntry entry) throws IOException {
         Path path = imagePath(entry);
-        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+        if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(path)) {
             throw new IOException("Missing image for slot " + entry.slot());
         }
         byte[] bytes = Files.readAllBytes(path);
+        if (bytes.length > MAX_MASTER_BYTES) {
+            throw new IOException("Image exceeds the master size limit for slot " + entry.slot());
+        }
         if (!sha256(bytes).equals(entry.sha256())) {
             throw new IOException("Image digest mismatch for slot " + entry.slot());
         }
         BufferedImage image = ImageProcessor.readBytes(bytes, entry.imageFile());
-        if (image.getWidth() != entry.textureWidth() || image.getHeight() != entry.textureHeight()) {
-            throw new IOException("Image dimensions mismatch for slot " + entry.slot());
+        validateMasterDimensions(image, entry.slot());
+    }
+
+    private static void validateMaster(byte[] png) throws IOException {
+        if (png == null || png.length == 0 || png.length > MAX_MASTER_BYTES) {
+            throw new IOException("Invalid master image size");
+        }
+        BufferedImage image = ImageProcessor.readBytes(png, "slot.png");
+        validateMasterDimensions(image, -1);
+    }
+
+    private static void validateMasterDimensions(BufferedImage image, int slot) throws IOException {
+        if (image.getWidth() <= 0 || image.getHeight() <= 0
+                || image.getWidth() > MAX_MASTER_SIDE || image.getHeight() > MAX_MASTER_SIDE
+                || (long) image.getWidth() * image.getHeight() > ImageProcessor.MAX_OUTPUT_PIXELS) {
+            throw new IOException("Master image dimensions are outside the safe limit"
+                    + (slot >= 0 ? " for slot " + slot : ""));
         }
     }
 
@@ -210,6 +249,7 @@ public final class PaintingLibraryStore {
             object.addProperty("name", entry.name());
             object.addProperty("width", entry.width());
             object.addProperty("height", entry.height());
+            object.addProperty("fit", entry.fit().id());
             object.addProperty("image", entry.imageFile());
             object.addProperty("sha256", entry.sha256());
             object.addProperty("recipe", entry.recipeId());

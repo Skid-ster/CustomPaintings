@@ -1,6 +1,7 @@
 package com.jay.custompaintings.network;
 
 import com.jay.custompaintings.CustomPaintingsMod;
+import com.jay.custompaintings.image.ImageFit;
 import com.jay.custompaintings.library.PaintingEntry;
 import com.jay.custompaintings.library.PaintingLibrary;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -9,32 +10,34 @@ import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-import java.util.ArrayList;
 import java.util.List;
 
-/** Bounded custom payloads. Images are already resized/encoded PNGs, never arbitrary original files. */
+/** Bounded custom payloads. Images are aspect-preserving master PNGs, never arbitrary original files. */
 public final class PaintingPayloads {
     public static final int MAX_IMAGE_BYTES = 8 * 1024 * 1024;
     public static final int MAX_SYNC_BYTES = 1 + PaintingEntry.MAX_PAINTINGS * (MAX_IMAGE_BYTES + 1024);
 
-    public record EntryData(int slot, String name, int width, int height, String sha256, String recipeId, byte[] png) {
+    public record EntryData(int slot, String name, int width, int height, String fit,
+                            String sha256, String recipeId, byte[] png) {
         public static final StreamCodec<RegistryFriendlyByteBuf, EntryData> STREAM_CODEC = StreamCodec.composite(
                 ByteBufCodecs.VAR_INT, EntryData::slot,
                 ByteBufCodecs.STRING_UTF8, EntryData::name,
                 ByteBufCodecs.VAR_INT, EntryData::width,
                 ByteBufCodecs.VAR_INT, EntryData::height,
+                ByteBufCodecs.STRING_UTF8, EntryData::fit,
                 ByteBufCodecs.STRING_UTF8, EntryData::sha256,
                 ByteBufCodecs.STRING_UTF8, EntryData::recipeId,
                 ByteBufCodecs.byteArray(MAX_IMAGE_BYTES), EntryData::png,
                 EntryData::new);
 
         public PaintingEntry entry() {
-            return new PaintingEntry(slot, name, width, height, "slot_" + slot + ".png", sha256, recipeId);
+            return new PaintingEntry(slot, name, width, height, ImageFit.fromId(fit),
+                    "slot_" + slot + ".png", sha256, recipeId);
         }
     }
 
     public record Sync(long revision, long recipeSeed, boolean canEdit, List<EntryData> entries) implements CustomPacketPayload {
-        public static final Type<Sync> TYPE = new Type<>(CustomPaintingsMod.id("library_sync"));
+        public static final Type<Sync> TYPE = new Type<>(CustomPaintingsMod.id("library_sync_v2"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Sync> STREAM_CODEC = StreamCodec.composite(
                 ByteBufCodecs.VAR_LONG, Sync::revision,
                 ByteBufCodecs.VAR_LONG, Sync::recipeSeed,
@@ -52,13 +55,14 @@ public final class PaintingPayloads {
         }
     }
 
-    public record Upload(long requestId, String name, int width, int height, byte[] png) implements CustomPacketPayload {
-        public static final Type<Upload> TYPE = new Type<>(CustomPaintingsMod.id("upload"));
+    public record Upload(long requestId, String name, int width, int height, String fit, byte[] png) implements CustomPacketPayload {
+        public static final Type<Upload> TYPE = new Type<>(CustomPaintingsMod.id("upload_v2"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Upload> STREAM_CODEC = StreamCodec.composite(
                 ByteBufCodecs.VAR_LONG, Upload::requestId,
                 ByteBufCodecs.STRING_UTF8, Upload::name,
                 ByteBufCodecs.VAR_INT, Upload::width,
                 ByteBufCodecs.VAR_INT, Upload::height,
+                ByteBufCodecs.STRING_UTF8, Upload::fit,
                 ByteBufCodecs.byteArray(MAX_IMAGE_BYTES), Upload::png,
                 Upload::new);
 
@@ -80,11 +84,14 @@ public final class PaintingPayloads {
         }
     }
 
-    public record Resize(long requestId, int slot, int width, int height) implements CustomPacketPayload {
-        public static final Type<Resize> TYPE = new Type<>(CustomPaintingsMod.id("resize"));
-        public static final StreamCodec<RegistryFriendlyByteBuf, Resize> STREAM_CODEC = StreamCodec.composite(
-                ByteBufCodecs.VAR_LONG, Resize::requestId, ByteBufCodecs.VAR_INT, Resize::slot,
-                ByteBufCodecs.VAR_INT, Resize::width, ByteBufCodecs.VAR_INT, Resize::height, Resize::new);
+    /** Atomic name/size/fit edit. Replaces the old lossy resize payload. */
+    public record Adjust(long requestId, int slot, String name, int width, int height, String fit) implements CustomPacketPayload {
+        public static final Type<Adjust> TYPE = new Type<>(CustomPaintingsMod.id("adjust_v2"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, Adjust> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_LONG, Adjust::requestId, ByteBufCodecs.VAR_INT, Adjust::slot,
+                ByteBufCodecs.STRING_UTF8, Adjust::name,
+                ByteBufCodecs.VAR_INT, Adjust::width, ByteBufCodecs.VAR_INT, Adjust::height,
+                ByteBufCodecs.STRING_UTF8, Adjust::fit, Adjust::new);
 
         @Override
         public Type<? extends CustomPacketPayload> type() {
@@ -105,7 +112,7 @@ public final class PaintingPayloads {
 
     /** Sent by the client once its play listener is ready, so login cannot race channel registration. */
     public record SyncRequest(int protocolVersion) implements CustomPacketPayload {
-        public static final int PROTOCOL_VERSION = 1;
+        public static final int PROTOCOL_VERSION = 2;
         public static final Type<SyncRequest> TYPE = new Type<>(CustomPaintingsMod.id("request_sync"));
         public static final StreamCodec<RegistryFriendlyByteBuf, SyncRequest> STREAM_CODEC =
                 StreamCodec.of((buf, request) -> buf.writeVarInt(request.protocolVersion()),
@@ -137,7 +144,7 @@ public final class PaintingPayloads {
         PayloadTypeRegistry.clientboundPlay().register(Result.TYPE, Result.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().registerLarge(Upload.TYPE, Upload.STREAM_CODEC, MAX_IMAGE_BYTES + 1024);
         PayloadTypeRegistry.serverboundPlay().register(Rename.TYPE, Rename.STREAM_CODEC);
-        PayloadTypeRegistry.serverboundPlay().register(Resize.TYPE, Resize.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(Adjust.TYPE, Adjust.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(Remove.TYPE, Remove.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(SyncRequest.TYPE, SyncRequest.STREAM_CODEC);
     }

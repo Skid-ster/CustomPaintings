@@ -1,6 +1,7 @@
 package com.jay.custompaintings.server;
 
 import com.jay.custompaintings.CustomPaintingsMod;
+import com.jay.custompaintings.image.ImageFit;
 import com.jay.custompaintings.library.PaintingEntry;
 import com.jay.custompaintings.library.PaintingLibrary;
 import com.jay.custompaintings.library.PaintingRuntime;
@@ -30,7 +31,7 @@ public final class PaintingServerNetwork {
     public static void register() {
         ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.Upload.TYPE, (payload, context) ->
                 mutate(context.server(), context.player(), payload.requestId(), () -> {
-                    PaintingServerState.store().add(payload.name(), payload.width(), payload.height(), payload.png());
+                    PaintingServerState.store().add(payload.name(), payload.width(), payload.height(), ImageFit.fromId(payload.fit()), payload.png());
                     return "Painting added";
                 }));
         ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.Rename.TYPE, (payload, context) ->
@@ -38,11 +39,15 @@ public final class PaintingServerNetwork {
                     PaintingServerState.store().rename(payload.slot(), payload.name());
                     return "Painting renamed";
                 }, () -> renamePlacedPaintings(context.server(), payload.slot(), payload.name())));
-        ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.Resize.TYPE, (payload, context) ->
+        ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.Adjust.TYPE, (payload, context) ->
                 mutate(context.server(), context.player(), payload.requestId(), () -> {
-                    PaintingServerState.store().resize(payload.slot(), payload.width(), payload.height());
-                    return "Painting resized";
-                }, () -> resizePlacedPaintings(context.server(), payload.slot(), payload.width(), payload.height())));
+                    PaintingServerState.store().adjust(payload.slot(), payload.name(), payload.width(), payload.height(),
+                            ImageFit.fromId(payload.fit()));
+                    return "Painting updated";
+                }, () -> {
+                    renamePlacedPaintings(context.server(), payload.slot(), payload.name());
+                    resizePlacedPaintings(context.server(), payload.slot(), payload.width(), payload.height());
+                }));
         ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.Remove.TYPE, (payload, context) ->
                 mutate(context.server(), context.player(), payload.requestId(), () -> {
                     PaintingServerState.store().remove(payload.slot());
@@ -208,7 +213,7 @@ public final class PaintingServerNetwork {
             for (PaintingEntry entry : library.entries()) {
                 byte[] png = Files.readAllBytes(PaintingServerState.store().imagePath(entry));
                 entries.add(new PaintingPayloads.EntryData(entry.slot(), entry.name(), entry.width(), entry.height(),
-                        entry.sha256(), entry.recipeId(), png));
+                        entry.fit().id(), entry.sha256(), entry.recipeId(), png));
             }
         } catch (IOException exception) {
             CustomPaintingsMod.LOGGER.error("Could not read painting images for sync", exception);

@@ -1,6 +1,7 @@
 package com.jay.custompaintings.client;
 
 import com.jay.custompaintings.CustomPaintingsMod;
+import com.jay.custompaintings.image.ImageFit;
 import com.jay.custompaintings.image.ImageProcessor;
 import com.jay.custompaintings.library.PaintingEntry;
 import com.jay.custompaintings.library.PaintingRuntime;
@@ -79,8 +80,8 @@ public final class PaintingTextureManager {
             }
             try {
                 BufferedImage source = ImageProcessor.readBytes(png, entry.imageFile());
-                ImageProcessor.Pixels full = ImageProcessor.resize(source, entry.textureWidth(), entry.textureHeight());
-                ImageProcessor.Pixels preview = ImageProcessor.resize(source, 96, 96);
+                ImageProcessor.Pixels full = ImageProcessor.compose(source, entry.textureWidth(), entry.textureHeight(), entry.fit());
+                ImageProcessor.Pixels preview = ImageProcessor.compose(source, 96, 96, entry.fit());
                 loaded.add(new LoadedImage(entry, preview, null));
                 Identifier spriteId = paintings
                         ? PaintingRuntime.variantAssetId(entry.slot(), entry.width(), entry.height())
