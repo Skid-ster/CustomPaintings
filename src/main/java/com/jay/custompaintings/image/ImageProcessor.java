@@ -50,9 +50,23 @@ public final class ImageProcessor {
         if (attributes.size() > MAX_FILE_BYTES) {
             throw new IOException("Image exceeds the 32 MiB file-size limit");
         }
+        try (InputStream input = new BufferedInputStream(Files.newInputStream(file))) {
+            return readStream(input, file.getFileName().toString());
+        }
+    }
 
-        try (InputStream input = new BufferedInputStream(Files.newInputStream(file));
-             ImageInputStream imageInput = new MemoryCacheImageInputStream(input)) {
+    /** Bounded decoding for bytes received from a remote client or read from the canonical library. */
+    public static BufferedImage readBytes(byte[] bytes, String fileName) throws IOException {
+        if (bytes.length == 0 || bytes.length > MAX_FILE_BYTES) {
+            throw new IOException("Image exceeds the 32 MiB file-size limit");
+        }
+        try (InputStream input = new java.io.ByteArrayInputStream(bytes)) {
+            return readStream(input, fileName);
+        }
+    }
+
+    private static BufferedImage readStream(InputStream input, String fileName) throws IOException {
+        try (ImageInputStream imageInput = new MemoryCacheImageInputStream(input)) {
             Iterator<ImageReader> readers = ImageIO.getImageReaders(imageInput);
             if (!readers.hasNext()) {
                 throw new IOException("Unsupported or damaged image (PNG/JPG required)");
@@ -60,7 +74,7 @@ public final class ImageProcessor {
             ImageReader reader = readers.next();
             try {
                 String format = reader.getFormatName().toLowerCase(Locale.ROOT);
-                String name = file.getFileName().toString().toLowerCase(Locale.ROOT);
+                String name = fileName.toLowerCase(Locale.ROOT);
                 boolean png = name.endsWith(".png");
                 boolean matchesExtension = png ? format.equals("png")
                         : format.equals("jpeg") || format.equals("jpg");

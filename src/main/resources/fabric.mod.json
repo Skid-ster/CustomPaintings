@@ -3,7 +3,7 @@
   "id": "custompaintings",
   "version": "${version}",
   "name": "Custom Paintings",
-  "description": "Import PNG/JPG paintings from inside Minecraft through Mod Menu, with drag-and-drop, previews, and automatic reloads.",
+  "description": "Turn up to 10 PNG/JPG uploads into named, previewed, craftable custom paintings with their own creative items.",
   "authors": ["Skid-ster"],
   "contact": {
     "homepage": "https://github.com/Skid-ster/CustomPaintings",
@@ -12,18 +12,20 @@
   },
   "license": "MIT",
   "icon": "assets/custompaintings/icon.png",
-  "environment": "client",
+  "environment": "*",
   "entrypoints": {
     "main": ["com.jay.custompaintings.CustomPaintingsMod"],
     "client": ["com.jay.custompaintings.client.CustomPaintingsClient"],
     "modmenu": ["com.jay.custompaintings.client.CustomPaintingsModMenu"]
   },
-  "mixins": ["custompaintings.mixins.json"],
+  "mixins": ["custompaintings.common.mixins.json", "custompaintings.mixins.json"],
   "depends": {
     "fabricloader": ">=0.19.5",
     "minecraft": "~26.3",
     "java": ">=25",
-    "fabric-api": ">=0.161.0",
+    "fabric-api": ">=0.161.0"
+  },
+  "recommends": {
     "modmenu": ">=21.0.0"
   }
 }

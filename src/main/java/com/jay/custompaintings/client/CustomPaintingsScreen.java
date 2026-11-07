@@ -2,6 +2,9 @@ package com.jay.custompaintings.client;
 
 import com.jay.custompaintings.CustomPaintingsMod;
 import com.jay.custompaintings.image.ImageImporter;
+import com.jay.custompaintings.library.PaintingEntry;
+import com.jay.custompaintings.library.PaintingSizes;
+import com.jay.custompaintings.library.RecipeCatalog;
 import com.mojang.blaze3d.Blaze3D;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -18,7 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-/** Mod Menu configuration with in-game importing, drag-and-drop, previews and import reports. */
+/** Mod Menu library: up to 10 named, previewed, craftable custom paintings. */
 public final class CustomPaintingsScreen extends Screen {
     private static final int TEXT = 0xFFFFFFFF;
     private static final int MUTED = 0xFFAAB2BD;
@@ -29,12 +32,15 @@ public final class CustomPaintingsScreen extends Screen {
     private final Screen parent;
     private final PaintingTextureManager manager;
     private final PaintingImportService imports;
+    private final ClientPaintingLibrary library;
     private long displayedGeneration;
-    private String selectedFile;
+    private int selectedSlot = -1;
     private double scroll;
-    private ImageList list;
+    private PaintingList list;
     private Button uploadButton;
     private Button reloadButton;
+    private Button renameButton;
+    private Button sizeButton;
     private Button removeButton;
     private Button detailsButton;
     private ImageFileChooser chooser;
@@ -46,22 +52,20 @@ public final class CustomPaintingsScreen extends Screen {
         this.parent = parent;
         this.manager = CustomPaintingsClient.paintings();
         this.imports = CustomPaintingsClient.imports();
+        this.library = CustomPaintingsClient.library();
     }
 
     @Override
     protected void init() {
-        PaintingTextureManager.Snapshot snapshot = manager.snapshot();
-        displayedGeneration = snapshot.generation();
-        int margin = this.width < 360 ? 10 : 24;
-        int contentWidth = Math.max(100, this.width - margin * 2);
-        int listTop = 91;
-        int listBottom = Math.max(listTop + 24, this.height - 79);
-        list = new ImageList(this.minecraft, contentWidth, listBottom - listTop, listTop, 58);
+        displayedGeneration = manager.snapshot().generation();
+        int margin = this.width < 420 ? 10 : 24;
+        int contentWidth = Math.max(120, this.width - margin * 2);
+        int listTop = 92;
+        int listBottom = Math.max(listTop + 24, this.height - 92);
+        list = new PaintingList(this.minecraft, contentWidth, listBottom - listTop, listTop, 62);
         list.updateSizeAndPosition(contentWidth, listBottom - listTop, margin, listTop);
-        if (selectedFile != null) {
-            list.children().stream().filter(entry -> entry.image.fileName().equals(selectedFile))
-                    .findFirst().ifPresent(list::setSelected);
-        }
+        list.children().stream().filter(entry -> entry.painting.entry().slot() == selectedSlot)
+                .findFirst().ifPresent(list::setSelected);
         list.setScrollAmount(scroll);
         addRenderableWidget(list);
 
@@ -72,8 +76,7 @@ public final class CustomPaintingsScreen extends Screen {
         int uploadY = 62;
         uploadButton = Button.builder(Component.translatable("config.custompaintings.upload"), button -> chooseFiles())
                 .bounds(left, uploadY, buttonWidth * 2 + gap, 20)
-                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.upload.tooltip")))
-                .build();
+                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.upload.tooltip"))).build();
         addRenderableWidget(uploadButton);
         reloadButton = Button.builder(Component.translatable("config.custompaintings.reload"), button -> {
             clearNotice();
@@ -82,21 +85,28 @@ public final class CustomPaintingsScreen extends Screen {
                 .tooltip(Tooltip.create(Component.translatable("config.custompaintings.reload.tooltip"))).build();
         addRenderableWidget(reloadButton);
         detailsButton = Button.builder(Component.translatable("config.custompaintings.details"), button -> showDetails())
-                .bounds(left + (buttonWidth + gap) * 3, uploadY, buttonWidth, 20)
-                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.details.tooltip"))).build();
+                .bounds(left + (buttonWidth + gap) * 3, uploadY, buttonWidth, 20).build();
         addRenderableWidget(detailsButton);
 
         int bottom = this.height - 32;
-        int bottomWidth = Math.max(50, (contentWidth - gap * 2) / 3);
-        int bottomLeft = (this.width - bottomWidth * 3 - gap * 2) / 2;
-        addRenderableWidget(Button.builder(Component.translatable("config.custompaintings.openFolder"), button -> openFolder())
-                .bounds(bottomLeft, bottom, bottomWidth, 20).build());
+        int editY = this.height - 58;
+        int smallWidth = Math.max(48, (contentWidth - gap * 3) / 4);
+        int smallLeft = (this.width - smallWidth * 4 - gap * 3) / 2;
+        renameButton = Button.builder(Component.translatable("config.custompaintings.rename"), button -> editName())
+                .bounds(smallLeft, editY, smallWidth, 20).build();
+        addRenderableWidget(renameButton);
+        sizeButton = Button.builder(Component.translatable("config.custompaintings.size"), button -> cycleSize())
+                .bounds(smallLeft + smallWidth + gap, editY, smallWidth, 20)
+                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.size.tooltip"))).build();
+        addRenderableWidget(sizeButton);
         removeButton = Button.builder(Component.translatable("config.custompaintings.remove"), button -> confirmRemove())
-                .bounds(bottomLeft + bottomWidth + gap, bottom, bottomWidth, 20)
-                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.remove.tooltip"))).build();
+                .bounds(smallLeft + (smallWidth + gap) * 2, editY, smallWidth, 20).build();
         addRenderableWidget(removeButton);
         addRenderableWidget(Button.builder(Component.translatable("config.custompaintings.done"), button -> onClose())
-                .bounds(bottomLeft + (bottomWidth + gap) * 2, bottom, bottomWidth, 20).build());
+                .bounds(smallLeft + (smallWidth + gap) * 3, editY, smallWidth, 20).build());
+        addRenderableWidget(Button.builder(Component.translatable("config.custompaintings.openFolder"), button -> openFolder())
+                .bounds((this.width - 160) / 2, bottom, 160, 20)
+                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.openFolder.tooltip"))).build());
         updateControls();
     }
 
@@ -129,10 +139,9 @@ public final class CustomPaintingsScreen extends Screen {
 
     @Override
     public void onFilesDrop(List<Path> files) {
-        if (chooser != null) {
-            return;
+        if (chooser == null) {
+            startImport(files);
         }
-        startImport(files);
     }
 
     private void startImport(List<Path> files) {
@@ -140,48 +149,72 @@ public final class CustomPaintingsScreen extends Screen {
         if (files.isEmpty()) {
             return;
         }
-        if (files.size() > ImageImporter.MAX_BATCH_FILES) {
+        if (!library.canEdit()) {
+            setNotice(Component.translatable("config.custompaintings.noPermission"), ERROR);
+        } else if (files.size() > ImageImporter.MAX_BATCH_FILES) {
             setNotice(Component.translatable("config.custompaintings.import.tooMany", ImageImporter.MAX_BATCH_FILES), ERROR);
+        } else if (files.size() > library.library().freeSlots()) {
+            setNotice(Component.translatable("config.custompaintings.libraryFull", library.library().freeSlots()), ERROR);
         } else if (!imports.importImages(files)) {
             setNotice(Component.translatable("config.custompaintings.import.busy"), WARNING);
         }
         updateControls();
     }
 
-    private void openFolder() {
-        try {
-            Files.createDirectories(manager.directory());
-            // 26.3 uses the SDL-backed Blaze3D API rather than the removed Util.OS helper.
-            Blaze3D.openPath(manager.directory());
-        } catch (IOException | RuntimeException exception) {
-            CustomPaintingsMod.LOGGER.warn("Could not open the image folder", exception);
-            setNotice(Component.translatable("config.custompaintings.folder.unavailable"), ERROR);
+    private void editName() {
+        PaintingEntry entry = selected();
+        if (entry != null && !imports.state().busy()) {
+            minecraft.gui.setScreen(new EditPaintingScreen(this, entry));
+        }
+    }
+
+    private void cycleSize() {
+        PaintingEntry entry = selected();
+        if (entry == null || imports.state().busy()) {
+            return;
+        }
+        List<PaintingSizes.Size> presets = PaintingSizes.PRESETS;
+        int index = presets.indexOf(PaintingSizes.of(entry.width(), entry.height()));
+        PaintingSizes.Size next = presets.get((index + 1) % presets.size());
+        clearNotice();
+        if (!imports.resize(entry.slot(), next)) {
+            setNotice(Component.translatable("config.custompaintings.import.busy"), WARNING);
         }
     }
 
     private void confirmRemove() {
-        ImageEntry entry = list == null ? null : list.getSelected();
+        PaintingEntry entry = selected();
         if (entry == null || imports.state().busy()) {
             return;
         }
-        String fileName = entry.image.fileName();
         minecraft.gui.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(confirmed -> {
             minecraft.gui.setScreen(this);
             if (confirmed) {
-                removeFile(fileName);
+                clearNotice();
+                if (imports.remove(entry.slot())) {
+                    selectedSlot = -1;
+                } else {
+                    setNotice(Component.translatable("config.custompaintings.remove.failed", entry.name()), ERROR);
+                }
             }
         }, Component.translatable("config.custompaintings.remove.title"),
-                Component.translatable("config.custompaintings.remove.message", fileName),
+                Component.translatable("config.custompaintings.remove.message", entry.name()),
                 Component.translatable("config.custompaintings.remove.confirm"),
                 Component.translatable("config.custompaintings.cancel")));
     }
 
-    private void removeFile(String fileName) {
-        clearNotice();
-        if (imports.removeImage(fileName)) {
-            selectedFile = null;
-        } else {
-            setNotice(Component.translatable("config.custompaintings.remove.failed", fileName), ERROR);
+    private PaintingEntry selected() {
+        PaintingRow row = list == null ? null : list.getSelected();
+        return row == null ? null : row.painting.entry();
+    }
+
+    private void openFolder() {
+        try {
+            Files.createDirectories(manager.directory());
+            Blaze3D.openPath(manager.directory());
+        } catch (IOException | RuntimeException exception) {
+            CustomPaintingsMod.LOGGER.warn("Could not open the local image folder", exception);
+            setNotice(Component.translatable("config.custompaintings.folder.unavailable"), ERROR);
         }
     }
 
@@ -195,8 +228,8 @@ public final class CustomPaintingsScreen extends Screen {
     @Override
     public void tick() {
         if (list != null) {
-            ImageEntry selected = list.getSelected();
-            selectedFile = selected == null ? null : selected.image.fileName();
+            PaintingEntry entry = selected();
+            selectedSlot = entry == null ? -1 : entry.slot();
             scroll = list.scrollAmount();
         }
         if (manager.snapshot().generation() != displayedGeneration) {
@@ -210,9 +243,13 @@ public final class CustomPaintingsScreen extends Screen {
             return;
         }
         boolean busy = imports.state().busy() || chooser != null;
-        uploadButton.active = !busy;
+        boolean editable = library.synced() && library.canEdit() && !busy;
+        uploadButton.active = editable && library.library().freeSlots() > 0;
         reloadButton.active = !busy;
-        removeButton.active = !busy && list != null && list.getSelected() != null;
+        PaintingEntry entry = selected();
+        renameButton.active = editable && entry != null;
+        sizeButton.active = editable && entry != null;
+        removeButton.active = editable && entry != null;
         PaintingImportService.State state = imports.state();
         detailsButton.active = !busy && (state.report() != null || state.error() != null);
         uploadButton.setMessage(Component.translatable(state.phase() == PaintingImportService.Phase.IMPORTING
@@ -234,22 +271,22 @@ public final class CustomPaintingsScreen extends Screen {
         PaintingTextureManager.Snapshot snapshot = manager.snapshot();
         graphics.centeredText(this.font, this.title, this.width / 2, 9, TEXT);
         graphics.centeredText(this.font, Component.translatable("config.custompaintings.summary",
-                snapshot.loadedCount(), snapshot.assignedCount()), this.width / 2, 25, SUCCESS);
-        String directory = this.font.plainSubstrByWidth(manager.directory().toString(), this.width - 24);
-        graphics.centeredText(this.font, directory, this.width / 2, 40, MUTED);
+                library.library().count(), PaintingEntry.MAX_PAINTINGS), this.width / 2, 25, SUCCESS);
+        String hint = library.synced()
+                ? (library.canEdit() ? Component.translatable("config.custompaintings.editable").getString()
+                : Component.translatable("config.custompaintings.readOnly").getString())
+                : Component.translatable("config.custompaintings.waitingSync").getString();
+        graphics.centeredText(this.font, this.font.plainSubstrByWidth(hint, this.width - 24), this.width / 2, 40, MUTED);
 
-        Component status = notice != null ? notice : statusMessage(snapshot);
-        int color = notice != null ? noticeColor : statusColor(snapshot);
-        String fitted = this.font.plainSubstrByWidth(status.getString(), this.width - 24);
-        graphics.centeredText(this.font, fitted, this.width / 2, this.height - 65, color);
-        graphics.centeredText(this.font, Component.translatable("config.custompaintings.dropHint"),
-                this.width / 2, this.height - 50, MUTED);
-
+        Component status = notice != null ? notice : statusMessage();
+        int color = notice != null ? noticeColor : statusColor();
+        graphics.centeredText(this.font, this.font.plainSubstrByWidth(status.getString(), this.width - 24),
+                this.width / 2, this.height - 78, color);
         if (snapshot.error() != null) {
             graphics.centeredText(this.font, this.font.plainSubstrByWidth(
                     Component.translatable("config.custompaintings.folderError", snapshot.error()).getString(), this.width - 30),
                     this.width / 2, list.getY() + 8, ERROR);
-        } else if (snapshot.images().isEmpty() && list.getHeight() >= 42) {
+        } else if (library.library().entries().isEmpty() && list.getHeight() >= 42) {
             int middle = list.getY() + list.getHeight() / 2 - 12;
             graphics.centeredText(this.font, Component.translatable("config.custompaintings.empty"),
                     this.width / 2, middle, TEXT);
@@ -258,7 +295,7 @@ public final class CustomPaintingsScreen extends Screen {
         }
     }
 
-    private Component statusMessage(PaintingTextureManager.Snapshot snapshot) {
+    private Component statusMessage() {
         PaintingImportService.State state = imports.state();
         return switch (state.phase()) {
             case IDLE -> Component.translatable("config.custompaintings.ready");
@@ -274,7 +311,7 @@ public final class CustomPaintingsScreen extends Screen {
         };
     }
 
-    private int statusColor(PaintingTextureManager.Snapshot snapshot) {
+    private int statusColor() {
         PaintingImportService.State state = imports.state();
         return switch (state.phase()) {
             case IDLE -> MUTED;
@@ -294,14 +331,14 @@ public final class CustomPaintingsScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(parent);
+        minecraft.gui.setScreen(parent);
     }
 
-    private static final class ImageList extends ObjectSelectionList<ImageEntry> {
-        private ImageList(Minecraft minecraft, int width, int height, int y, int itemHeight) {
+    private static final class PaintingList extends ObjectSelectionList<PaintingRow> {
+        private PaintingList(Minecraft minecraft, int width, int height, int y, int itemHeight) {
             super(minecraft, width, height, y, itemHeight);
             for (PaintingTextureManager.LoadedImage image : CustomPaintingsClient.paintings().snapshot().images()) {
-                addEntry(new ImageEntry(image));
+                addEntry(new PaintingRow(image));
             }
         }
 
@@ -311,32 +348,25 @@ public final class CustomPaintingsScreen extends Screen {
         }
     }
 
-    private static final class ImageEntry extends ObjectSelectionList.Entry<ImageEntry> {
-        private final PaintingTextureManager.LoadedImage image;
+    private static final class PaintingRow extends ObjectSelectionList.Entry<PaintingRow> {
+        private final PaintingTextureManager.LoadedImage painting;
 
-        private ImageEntry(PaintingTextureManager.LoadedImage image) {
-            this.image = image;
+        private PaintingRow(PaintingTextureManager.LoadedImage painting) {
+            this.painting = painting;
         }
 
         @Override
         public Component getNarration() {
-            return Component.literal(image.fileName() + ": ").append(status());
+            return Component.literal(painting.entry().name() + ": ").append(status());
         }
 
         private Component status() {
-            if (!image.successful()) {
-                return Component.translatable("config.custompaintings.error", image.error());
+            if (!painting.successful()) {
+                return Component.translatable("config.custompaintings.error", painting.error());
             }
-            if (image.replacements().isEmpty()) {
-                return Component.translatable("config.custompaintings.unassigned");
-            }
-            var pixels = image.preview();
-            String dimensions = " (" + pixels.width() + " × " + pixels.height() + ")";
-            if (image.replacements().size() == 1) {
-                return Component.translatable("config.custompaintings.replaces", image.replacements().getFirst().targetId() + dimensions);
-            }
-            return Component.translatable("config.custompaintings.replacesMany", image.replacements().size())
-                    .append(Component.literal(dimensions));
+            PaintingEntry entry = painting.entry();
+            return Component.translatable("config.custompaintings.entryStatus", entry.sizeLabel(),
+                    RecipeCatalog.get(entry.recipeId()).label());
         }
 
         @Override
@@ -345,28 +375,21 @@ public final class CustomPaintingsScreen extends Screen {
             int y = getContentY();
             int width = getContentWidth();
             Minecraft minecraft = Minecraft.getInstance();
-            graphics.fill(x, y, x + 44, y + 44, 0xFF202020);
-            Identifier texture = CustomPaintingsClient.paintings().previewTexture(image.fileName());
-            if (image.successful() && texture != null) {
-                var pixels = image.preview();
-                float scale = Math.min(40.0F / pixels.width(), 40.0F / pixels.height());
-                int drawnWidth = Math.max(1, Math.round(pixels.width() * scale));
-                int drawnHeight = Math.max(1, Math.round(pixels.height() * scale));
-                graphics.blit(RenderPipelines.GUI_TEXTURED, texture,
-                        x + 2 + (40 - drawnWidth) / 2, y + 2 + (40 - drawnHeight) / 2,
-                        0.0F, 0.0F, drawnWidth, drawnHeight, pixels.width(), pixels.height(), TEXT);
+            graphics.fill(x, y, x + 48, y + 48, 0xFF202020);
+            Identifier texture = CustomPaintingsClient.paintings().previewTexture(painting.entry().slot());
+            if (painting.successful() && texture != null) {
+                graphics.blit(RenderPipelines.GUI_TEXTURED, texture, x + 2, y + 2,
+                        0.0F, 0.0F, 44, 44, 96, 96, TEXT);
             } else {
-                graphics.centeredText(minecraft.font, "!", x + 22, y + 17, ERROR);
+                graphics.centeredText(minecraft.font, "!", x + 24, y + 19, ERROR);
             }
-            int textX = x + 52;
-            int textWidth = Math.max(10, width - 56);
-            graphics.text(minecraft.font, minecraft.font.plainSubstrByWidth(image.fileName(), textWidth), textX, y + 3, TEXT);
+            int textX = x + 56;
+            int textWidth = Math.max(10, width - 60);
+            graphics.text(minecraft.font, minecraft.font.plainSubstrByWidth(painting.entry().name(), textWidth), textX, y + 4, TEXT);
             String statusText = minecraft.font.plainSubstrByWidth(status().getString(), textWidth);
-            graphics.text(minecraft.font, statusText, textX, y + 20,
-                    image.successful() ? (image.replacements().isEmpty() ? MUTED : SUCCESS) : ERROR);
-            if (!image.successful()) {
-                graphics.text(minecraft.font, "PNG / JPG / JPEG", textX, y + 35, MUTED);
-            }
+            graphics.text(minecraft.font, statusText, textX, y + 21, painting.successful() ? SUCCESS : ERROR);
+            graphics.text(minecraft.font, Component.translatable("config.custompaintings.slot", painting.entry().slot() + 1),
+                    textX, y + 36, MUTED);
         }
     }
 }

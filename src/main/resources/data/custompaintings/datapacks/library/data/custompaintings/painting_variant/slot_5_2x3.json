@@ -1,0 +1,16 @@
+{
+  "width": 2,
+  "height": 3,
+  "asset_id": "custompaintings:slot_5_2x3",
+  "title": {
+    "translate": "painting.custompaintings.slot.title",
+    "with": [
+      {
+        "text": "6"
+      }
+    ]
+  },
+  "author": {
+    "translate": "painting.custompaintings.author"
+  }
+}

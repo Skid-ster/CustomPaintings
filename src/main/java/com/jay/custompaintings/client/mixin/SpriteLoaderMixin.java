@@ -28,9 +28,9 @@ public abstract class SpriteLoaderMixin {
     @ModifyVariable(method = "stitch", at = @At("HEAD"), argsOnly = true, ordinal = 0)
     private List<SpriteContents> custompaintings$replacePaintingPixels(List<SpriteContents> sprites) {
         PaintingTextureManager manager = CustomPaintingsClient.paintings();
-        if (manager == null || !this.location.equals(AtlasIds.PAINTINGS)) {
+        if (manager == null || (!this.location.equals(AtlasIds.PAINTINGS) && !this.location.equals(AtlasIds.ITEMS))) {
             return sprites;
         }
-        return manager.prepareSprites(sprites);
+        return manager.prepareSprites(sprites, this.location);
     }
 }
