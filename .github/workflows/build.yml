@@ -108,13 +108,15 @@ jobs:
   release:
     name: Publish GitHub Release
     needs: build
-    # Publish permanent releases only from version tags or an explicit main-branch dispatch.
-    # Ordinary pushes/PRs still produce downloadable CI artifacts.
+    # Successful main builds publish the current version automatically.
+    # Version tags and explicit main dispatches are also supported.
+    # Existing releases are never overwritten; other branches/PRs only upload CI artifacts.
     if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       startsWith(github.ref, 'refs/tags/v') ||
       (github.event_name == 'workflow_dispatch' &&
        github.ref == 'refs/heads/main' &&
-       github.event.inputs.publish_release == 'true')
+       inputs.publish_release)
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -154,10 +156,12 @@ jobs:
           fi
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release ${tag} already exists. Bump mod_version before publishing another release." >&2
-            exit 1
+            echo "Release ${tag} already exists; skipping publication. Bump mod_version to publish a new release."
+            echo 'skip=true' >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
+          checksums="$(cd release-assets && sha256sum "$(basename "$mod_jar")" "$(basename "$sources_jar")")"
           {
             echo "Automated release of Custom Paintings ${tag}."
             echo
@@ -167,16 +171,27 @@ jobs:
             echo "- Fabric API: 0.161.0+26.3"
             echo "- Mod Menu: 21.0.0"
             echo "- Java: 25"
+            echo "- Build: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
             echo
             echo "Install \`custompaintings-${MOD_VERSION}.jar\` into your instance's mods folder."
             echo "The sources JAR is provided for development/reference only."
+            echo
+            echo '### SHA-256 checksums'
+            echo
+            echo '```text'
+            echo "$checksums"
+            echo '```'
+            echo
+            echo 'CI compilation and unit tests passed. An in-game rendering smoke test is still recommended.'
           } > release-notes.md
 
+          echo 'skip=false' >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "mod_jar=$mod_jar" >> "$GITHUB_OUTPUT"
           echo "sources_jar=$sources_jar" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
+        if: steps.release.outputs.skip != 'true'
         shell: bash
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
