@@ -22,7 +22,7 @@ The build uses **`net.fabricmc.fabric-loom`**, not the legacy/remapping plugin. 
 ## Install and use
 
 1. Install Fabric Loader **0.19.5** for Minecraft **26.3**, using **Java 25**.
-2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.2.1.jar` into the **client** mods folder. For multiplayer, install the mod and Fabric API on the **server** too.
+2. Put Fabric API **0.161.0+26.3**, Mod Menu **21.0.0**, and `custompaintings-1.2.2.jar` into the **client** mods folder. For multiplayer, install the mod and Fabric API on the **server** too.
 3. Launch the game, open **Mods → Custom Paintings → Configure**, and choose **Upload Images**.
 4. Select `.png`, `.jpg`, or `.jpeg` files, or drag them onto the screen. Each image becomes a new custom painting in the first free slot.
 5. Wait for upload, server data reload, and texture reload. The screen shows previews, names, sizes, and assigned recipes.
@@ -78,7 +78,7 @@ Install a full **JDK 25**, then:
 Outputs:
 
 ```text
-build/libs/custompaintings-1.2.1.jar
+build/libs/custompaintings-1.2.2.jar
 build/libs/custompaintings-1.2.0-sources.jar
 ```
 
