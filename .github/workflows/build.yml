@@ -42,7 +42,29 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build and test
-        run: ./gradlew build --no-daemon --stacktrace
+        shell: bash
+        run: ./gradlew build --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: Publish build diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          {
+            echo '## Gradle build diagnostics'
+            echo
+            echo '```text'
+            if [ -f build.log ]; then tail -n 180 build.log; else echo 'Gradle did not produce a build log.'; fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload mod JARs
         uses: actions/upload-artifact@v4
