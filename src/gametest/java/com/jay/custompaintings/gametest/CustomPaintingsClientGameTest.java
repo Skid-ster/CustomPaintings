@@ -29,6 +29,7 @@ import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -132,7 +133,11 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             } finally {
                 graphics.dispose();
             }
-            ImageIO.write(image, "png", file.toFile());
+            try {
+                ImageIO.write(image, "png", file.toFile());
+            } catch (IOException exception) {
+                throw new UncheckedIOException("Could not write the generated test artwork", exception);
+            }
             return file;
         });
     }
