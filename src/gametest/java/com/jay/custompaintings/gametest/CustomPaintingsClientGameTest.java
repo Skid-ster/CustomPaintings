@@ -545,7 +545,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
         return world.getServer().computeOnServer(server -> {
             ServerPlayer player = world.getConnection().getServerPlayer();
             ServerLevel level = player.level();
-            BlockPos wall = player.blockPosition().offset(-10, 0, -12);
+            BlockPos wall = player.blockPosition().offset(-10, -2, -6);
             for (int x = 0; x < 20; x++) {
                 for (int y = 0; y < 20; y++) {
                     level.setBlock(wall.offset(x, y, 0), Blocks.STONE.defaultBlockState(), 3);
@@ -555,7 +555,9 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                     .lookupOrThrow(Registries.PAINTING_VARIANT)
                     .get(PaintingRuntime.variantKey(width, height))
                     .orElseThrow(() -> new AssertionError("Canvas variant is not registered: " + width + "x" + height));
-            Painting painting = new Painting(level, wall.offset(10, 10, 1), Direction.SOUTH, variant);
+            // Keep the canvas a few blocks ahead and near eye height so the render assertion
+            // does not depend on the initial camera pitch or distant spawn-chunk visibility.
+            Painting painting = new Painting(level, wall.offset(10, 3, 1), Direction.SOUTH, variant);
             PaintingData.setEntityPaintingId(painting, paintingId);
             if (!painting.survives()) {
                 throw new AssertionError("Test painting could not be placed on the generated wall");
