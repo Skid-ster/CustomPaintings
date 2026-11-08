@@ -173,10 +173,22 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
 
             edit(context, wideEntryId, "Large Mural", 8, 8, ImageFit.FILL);
             waitForEntry(context, wideEntryId, 8, 8, ImageFit.FILL);
-            context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting painting
-                    && painting.getVariant().unwrapKey()
-                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(8, 8)))
-                    .orElse(false), TIMEOUT_TICKS);
+            context.waitFor(client -> {
+                if (!(client.level.getEntity(wideId) instanceof Painting painting)) {
+                    return true;
+                }
+                return painting.getVariant().unwrapKey()
+                        .map(key -> key.identifier().equals(PaintingRuntime.variantId(8, 8)))
+                        .orElse(false);
+            }, 200);
+            context.runOnClient(client -> {
+                if (!(client.level.getEntity(wideId) instanceof Painting painting)
+                        || painting.getVariant().unwrapKey()
+                        .map(key -> !key.identifier().equals(PaintingRuntime.variantId(8, 8)))
+                        .orElse(true)) {
+                    throw new AssertionError("Resizing to 8x8 did not leave the painting alive with its new variant");
+                }
+            });
             context.waitTicks(20);
             assertArtworkUploaded(context, wideEntryId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-8x8-fill"));
@@ -559,7 +571,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
         return world.getServer().computeOnServer(server -> {
             ServerPlayer player = world.getConnection().getServerPlayer();
             ServerLevel level = player.level();
-            BlockPos wall = player.blockPosition().offset(-10, -1, -6);
+            BlockPos wall = player.blockPosition().offset(-10, 8, -6);
             for (int x = 0; x < 20; x++) {
                 // Leave room below the anchor for the maximum 8-block-tall canvas.
                 for (int y = -1; y < 20; y++) {
