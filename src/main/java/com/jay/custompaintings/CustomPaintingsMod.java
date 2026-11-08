@@ -1,9 +1,10 @@
 package com.jay.custompaintings;
 
 import com.jay.custompaintings.item.CustomPaintingItems;
+import com.jay.custompaintings.library.PaintingData;
 import com.jay.custompaintings.library.PaintingEntry;
 import com.jay.custompaintings.library.PaintingLibraryAccess;
-import com.jay.custompaintings.library.PaintingRuntime;
+import com.jay.custompaintings.library.RecipeCatalog;
 import com.jay.custompaintings.network.PaintingPayloads;
 import com.jay.custompaintings.recipe.CustomPaintingRecipe;
 import com.jay.custompaintings.server.PaintingServerNetwork;
@@ -21,7 +22,6 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.CreativeModeTab;
-
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import org.slf4j.Logger;
@@ -31,7 +31,10 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-/** Common entrypoint: stable items/variants, authoritative library, recipes and networking. */
+/**
+ * Common entrypoint: one component-driven item, 64 size-only variants, an unbounded library,
+ * wood/dye crafting and the chunked painting protocol.
+ */
 public final class CustomPaintingsMod implements ModInitializer {
     public static final String MOD_ID = "custompaintings";
     public static final Logger LOGGER = LoggerFactory.getLogger("Custom Paintings");
@@ -59,13 +62,13 @@ public final class CustomPaintingsMod implements ModInitializer {
             LOGGER.error("Could not load the custom painting library; starting empty", exception);
         }
         PaintingLibraryAccess.set(PaintingServerState::library);
+        PaintingData.register();
         CustomPaintingItems.register();
-        Registry.register(BuiltInRegistries.RECIPE_SERIALIZER, id("slot_recipe"), CustomPaintingRecipe.SERIALIZER);
+        Registry.register(BuiltInRegistries.RECIPE_SERIALIZER, id("painting_recipe"), CustomPaintingRecipe.SERIALIZER);
         PaintingPayloads.register();
         PaintingServerNetwork.register();
 
-        // Default built-in pack path: resourcepacks/library. It contains data only,
-        // so ResourceLoader registers the server-data side.
+        // Built-in data pack: 64 canvas variants plus the wood/dye recipe catalogue.
         FabricLoader.getInstance().getModContainer(MOD_ID).ifPresent(container ->
                 ResourceLoader.registerBuiltinPack(id("library"), container,
                         Component.translatable("pack.custompaintings.library"), PackActivationType.ALWAYS_ENABLED));
@@ -75,16 +78,17 @@ public final class CustomPaintingsMod implements ModInitializer {
                 .icon(() -> new ItemStack(Items.PAINTING))
                 .displayItems((parameters, output) -> {
                     for (PaintingEntry entry : PaintingLibraryAccess.current().entries()) {
-                        output.accept(CustomPaintingItems.stack(entry.slot()));
+                        output.accept(CustomPaintingItems.stack(entry.id()));
                     }
                 })
                 .build());
         CreativeModeTabEvents.modifyOutputEvent(ResourceKey.create(Registries.CREATIVE_MODE_TAB,
                 Identifier.withDefaultNamespace("functional_blocks"))).register(output -> {
             for (PaintingEntry entry : PaintingLibraryAccess.current().entries()) {
-                output.insertAfter(Items.PAINTING, CustomPaintingItems.stack(entry.slot()));
+                output.insertAfter(Items.PAINTING, CustomPaintingItems.stack(entry.id()));
             }
         });
-        LOGGER.info("Custom Paintings initialized with {} stable slots and a 10-painting cap", PaintingEntry.MAX_PAINTINGS);
+        LOGGER.info("Custom Paintings initialized: unlimited paintings, {} wood/dye recipes, Painting Menu enabled",
+                RecipeCatalog.size());
     }
 }

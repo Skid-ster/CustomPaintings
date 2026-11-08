@@ -3,8 +3,10 @@
   "id": "custompaintings",
   "version": "${version}",
   "name": "Custom Paintings",
-  "description": "Turn up to 10 PNG/JPG uploads into named, craftable custom paintings with adjustable 1–8 block sizes, fit/fill/stretch modes, preserved transparency, live draft previews, and batched Apply/Discard editing.",
-  "authors": ["Skid-ster"],
+  "description": "Unlimited custom paintings from your own PNG/JPG images. Browse and take any painting from the in-game Painting Menu in Survival or Creative, craft them from 192 wood-and-dye combinations, and enjoy adjustable 1–8 block sizes, fit/fill/stretch modes, preserved transparency, live previews and batched Apply/Discard editing.",
+  "authors": [
+    "Skid-ster"
+  ],
   "contact": {
     "homepage": "https://github.com/Skid-ster/CustomPaintings",
     "sources": "https://github.com/Skid-ster/CustomPaintings",
@@ -14,11 +16,20 @@
   "icon": "assets/custompaintings/icon.png",
   "environment": "*",
   "entrypoints": {
-    "main": ["com.jay.custompaintings.CustomPaintingsMod"],
-    "client": ["com.jay.custompaintings.client.CustomPaintingsClient"],
-    "modmenu": ["com.jay.custompaintings.client.CustomPaintingsModMenu"]
+    "main": [
+      "com.jay.custompaintings.CustomPaintingsMod"
+    ],
+    "client": [
+      "com.jay.custompaintings.client.CustomPaintingsClient"
+    ],
+    "modmenu": [
+      "com.jay.custompaintings.client.CustomPaintingsModMenu"
+    ]
   },
-  "mixins": ["custompaintings.common.mixins.json", "custompaintings.mixins.json"],
+  "mixins": [
+    "custompaintings.common.mixins.json",
+    "custompaintings.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.19.5",
     "minecraft": "~26.3",

@@ -1,5 +1,6 @@
 package com.jay.custompaintings.library;
 
+import com.jay.custompaintings.image.ImageFit;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -36,12 +37,12 @@ class PaintingSizesTest {
 
     @Test
     void largeCanvasesStayWithinThePixelBudget() {
-        PaintingEntry entry = new PaintingEntry(0, "Large", 8, 8, "slot_0.png", "a".repeat(64), "paper_black");
+        PaintingEntry entry = new PaintingEntry(0, "Large", 8, 8, ImageFit.FIT, "painting_0.png", "a".repeat(64), "oak_red");
         assertEquals(128, entry.pixelsPerBlock());
         assertEquals(1024, entry.textureWidth());
         assertEquals(1024, entry.textureHeight());
         assertTrue((long) entry.textureWidth() * entry.textureHeight() <= PaintingEntry.MAX_CANVAS_PIXELS);
-        PaintingEntry wide = new PaintingEntry(1, "Wide", 8, 1, "slot_1.png", "b".repeat(64), "paper_blue");
+        PaintingEntry wide = new PaintingEntry(1, "Wide", 8, 1, ImageFit.FIT, "painting_1.png", "b".repeat(64), "oak_blue");
         assertEquals(2048, wide.textureWidth());
         assertEquals(256, wide.textureHeight());
     }

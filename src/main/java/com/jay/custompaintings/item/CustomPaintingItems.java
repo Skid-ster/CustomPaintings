@@ -1,45 +1,57 @@
 package com.jay.custompaintings.item;
 
-import com.jay.custompaintings.CustomPaintingsMod;
-import com.jay.custompaintings.library.PaintingEntry;
-import com.jay.custompaintings.library.PaintingLibraryAccess;
+import com.jay.custompaintings.library.PaintingData;
 import com.jay.custompaintings.library.PaintingRuntime;
 import net.minecraft.core.Registry;
+import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
 
-import java.util.ArrayList;
-import java.util.List;
-
-/** Ten stable item ids; occupied slots are exposed through creative tabs and crafting. */
+/** Registration and stack helpers for the one item that represents every custom painting. */
 public final class CustomPaintingItems {
-    private static final List<CustomPaintingItem> ITEMS = new ArrayList<>();
+    private static CustomPaintingItem item;
 
     private CustomPaintingItems() {
     }
 
     public static void register() {
-        for (int slot = 0; slot < PaintingEntry.MAX_PAINTINGS; slot++) {
-            CustomPaintingItem item = new CustomPaintingItem(slot, new Item.Properties()
-                    .setId(PaintingRuntime.itemKey(slot)).stacksTo(16));
-            Registry.register(BuiltInRegistries.ITEM, PaintingRuntime.itemKey(slot), item);
-            ITEMS.add(item);
-        }
+        item = new CustomPaintingItem(new Item.Properties()
+                .setId(PaintingRuntime.itemKey())
+                .stacksTo(16));
+        Registry.register(BuiltInRegistries.ITEM, PaintingRuntime.itemKey(), item);
     }
 
-    public static CustomPaintingItem get(int slot) {
-        return ITEMS.get(slot);
+    public static CustomPaintingItem get() {
+        return item;
     }
 
-    public static ItemStack stack(int slot) {
-        return new ItemStack(get(slot));
+    /** A stack representing one library painting. */
+    public static ItemStack stack(int paintingId) {
+        ItemStack stack = new ItemStack(item);
+        stack.set(PaintingData.PAINTING_ID, paintingId);
+        return stack;
     }
 
-    public static Component name(int slot) {
-        return PaintingLibraryAccess.current().get(slot)
-                .<Component>map(entry -> Component.literal(entry.name()))
-                .orElseGet(() -> Component.translatable("item.custompaintings.empty_slot", slot + 1));
+    public static ItemStack stack(int paintingId, int count) {
+        ItemStack stack = stack(paintingId);
+        stack.setCount(Math.max(1, Math.min(stack.getMaxStackSize(), count)));
+        return stack;
+    }
+
+    /** Recipe-book/creative display template carrying the painting id component. */
+    public static ItemStackTemplate template(int paintingId) {
+        return new ItemStackTemplate(item.builtInRegistryHolder(), 1,
+                DataComponentPatch.builder().set(PaintingData.PAINTING_ID, paintingId).build());
+    }
+
+    public static int paintingId(ItemStack stack) {
+        Integer id = stack.get(PaintingData.PAINTING_ID);
+        return id == null ? -1 : id;
+    }
+
+    public static boolean isCustomPainting(ItemStack stack) {
+        return !stack.isEmpty() && stack.is(item) && paintingId(stack) >= 0;
     }
 }
