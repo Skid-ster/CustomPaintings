@@ -10,10 +10,13 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.Minecraft;
 
+import java.util.concurrent.atomic.AtomicLong;
+
 /** Applies authoritative library snapshots and refreshes creative tabs/textures on the client thread. */
 public final class ClientPaintingNetwork {
     private static boolean reloadRunning;
     private static boolean reloadPending;
+    private static final AtomicLong TEXTURE_RELOADS = new AtomicLong();
 
     private ClientPaintingNetwork() {
     }
@@ -67,6 +70,11 @@ public final class ClientPaintingNetwork {
         return false;
     }
 
+    /** Number of atlas reloads this mod actually started; useful for tests and diagnostics. */
+    public static long textureReloadCount() {
+        return TEXTURE_RELOADS.get();
+    }
+
     /** Coalesce overlapping syncs into at most one running reload plus one follow-up reload. */
     private static void requestReload() {
         Minecraft minecraft = Minecraft.getInstance();
@@ -75,6 +83,7 @@ public final class ClientPaintingNetwork {
             return;
         }
         reloadRunning = true;
+        TEXTURE_RELOADS.incrementAndGet();
         minecraft.reloadResourcePacks().whenCompleteAsync((ignored, error) -> {
             reloadRunning = false;
             if (error != null) {

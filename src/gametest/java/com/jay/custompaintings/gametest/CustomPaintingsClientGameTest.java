@@ -151,6 +151,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             assertSprites(context, 1, 2, 2);
             context.waitTicks(40);
             long generationBeforeDrafts = CustomPaintingsClient.paintings().snapshot().generation();
+            long reloadsBeforeDrafts = com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount();
             long revisionBeforeDrafts = CustomPaintingsClient.library().library().revision();
             context.runOnClient(client -> {
                 var library = CustomPaintingsClient.library().library();
@@ -169,8 +170,8 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             });
             context.waitTicks(20);
             context.runOnClient(client -> {
-                if (CustomPaintingsClient.paintings().snapshot().generation() != generationBeforeDrafts) {
-                    throw new AssertionError("Staging drafts must not reload client textures");
+                if (com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount() != reloadsBeforeDrafts) {
+                    throw new AssertionError("Staging drafts must not request a client texture reload");
                 }
                 var library = CustomPaintingsClient.library().library();
                 if (library.revision() != revisionBeforeDrafts) {
@@ -203,8 +204,13 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             assertSprites(context, 0, 8, 8);
             assertSprites(context, 1, 4, 2);
             context.runOnClient(client -> {
-                if (CustomPaintingsClient.paintings().snapshot().generation() != generationBeforeDrafts + 1) {
-                    throw new AssertionError("Apply batch should coalesce into exactly one client atlas reload");
+                // Minecraft/server data reloads can add unrelated atlas generations in singleplayer.
+                // The mod's own coalescing gate must still start exactly one reload for the batch.
+                if (com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount() != reloadsBeforeDrafts + 1) {
+                    throw new AssertionError("Apply batch should coalesce into exactly one mod-requested atlas reload");
+                }
+                if (CustomPaintingsClient.paintings().snapshot().generation() <= generationBeforeDrafts) {
+                    throw new AssertionError("Apply batch should refresh the installed client textures");
                 }
                 if (CustomPaintingsClient.library().library().revision() != revisionBeforeDrafts + 1) {
                     throw new AssertionError("Apply batch should save exactly one authoritative revision");
