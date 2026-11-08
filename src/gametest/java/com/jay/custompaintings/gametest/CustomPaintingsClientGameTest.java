@@ -67,7 +67,9 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                 .adjustSettings(settings -> settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE))
                 .create()) {
             save = world.getWorldSave();
-            world.getConnection().waitForChunksRender();
+            // Waiting for every chunk in the full render-distance square is prohibitively slow in headless CI.
+            // The world connection provides the spawn chunks as they arrive; wait until those available chunks render.
+            world.getConnection().waitForChunksRender(false);
             world.getServer().runCommand("time set day");
             world.getServer().runCommand("weather clear");
             context.waitFor(client -> CustomPaintingsClient.library().synced()

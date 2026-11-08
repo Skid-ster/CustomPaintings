@@ -40,13 +40,13 @@ class PaintingLibraryStoreTest {
     }
 
     @Test
-    void enforcesCapAndRejectsInvalidMasters() throws Exception {
+    void acceptsMoreThanTenPaintingsAndRejectsInvalidMasters() throws Exception {
         PaintingLibraryStore store = new PaintingLibraryStore(temp);
         store.load();
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 25; i++) {
             store.add("Painting " + i, 1, 1, png(8, 4));
         }
-        assertThrows(java.io.IOException.class, () -> store.add("One too many", 1, 1, png(8, 4)));
+        assertEquals(25, store.library().count());
         PaintingLibraryStore other = new PaintingLibraryStore(temp.resolve("other"));
         other.load();
         assertThrows(java.io.IOException.class, () -> other.add("Bad", 9, 1, png(8, 4)));
