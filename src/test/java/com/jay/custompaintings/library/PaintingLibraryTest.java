@@ -1,5 +1,6 @@
 package com.jay.custompaintings.library;
 
+import com.jay.custompaintings.image.ImageFit;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
