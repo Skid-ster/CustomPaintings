@@ -179,8 +179,14 @@ public final class CustomPaintingsScreen extends Screen {
             return;
         }
         // Removals are staged too: nothing leaves the server until Apply is pressed.
-        CustomPaintingsClient.drafts().markRemoved(entry.slot());
-        setNotice(Component.translatable("config.custompaintings.remove.staged", entry.name()), WARNING);
+        // Pressing the same button again undoes just this slot's pending removal.
+        if (CustomPaintingsClient.drafts().isRemoved(entry.slot())) {
+            CustomPaintingsClient.drafts().discardSlot(entry.slot());
+            setNotice(Component.translatable("config.custompaintings.remove.undone", entry.name()), MUTED);
+        } else {
+            CustomPaintingsClient.drafts().markRemoved(entry.slot(), library.library());
+            setNotice(Component.translatable("config.custompaintings.remove.staged", entry.name()), WARNING);
+        }
         updateControls();
     }
 
@@ -248,7 +254,12 @@ public final class CustomPaintingsScreen extends Screen {
         reloadButton.active = !busy;
         PaintingEntry entry = selected();
         editButton.active = editable && entry != null;
-        removeButton.active = editable && entry != null && !CustomPaintingsClient.drafts().isRemoved(entry.slot());
+        boolean pendingRemoval = entry != null && CustomPaintingsClient.drafts().isRemoved(entry.slot());
+        removeButton.active = editable && entry != null;
+        removeButton.setMessage(Component.translatable(pendingRemoval
+                ? "config.custompaintings.remove.undo" : "config.custompaintings.remove"));
+        removeButton.setTooltip(Tooltip.create(Component.translatable(pendingRemoval
+                ? "config.custompaintings.remove.undo.tooltip" : "config.custompaintings.remove.staged.tooltip")));
         boolean hasDrafts = CustomPaintingsClient.drafts().hasChanges(library.library());
         applyButton.active = editable && hasDrafts;
         discardButton.active = editable && hasDrafts;

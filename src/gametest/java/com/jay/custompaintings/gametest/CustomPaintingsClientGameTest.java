@@ -157,16 +157,16 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                 var library = CustomPaintingsClient.library().library();
                 var drafts = CustomPaintingsClient.drafts();
                 drafts.stage(library.get(0).orElseThrow().withName("Batch Mural")
-                        .withSize(8, 8).withFit(ImageFit.STRETCH));
+                        .withSize(8, 8).withFit(ImageFit.STRETCH), library);
                 drafts.stage(library.get(1).orElseThrow().withName("Batch Two")
-                        .withSize(4, 2).withFit(ImageFit.FILL));
+                        .withSize(4, 2).withFit(ImageFit.FILL), library);
                 if (drafts.changeCount(library) != 2) {
                     throw new AssertionError("Expected two staged painting edits");
                 }
-                drafts.stage(library.get(1).orElseThrow().withName("Discarded"));
+                drafts.stage(library.get(1).orElseThrow().withName("Discarded"), library);
                 drafts.discardSlot(1);
                 drafts.stage(library.get(1).orElseThrow().withName("Batch Two")
-                        .withSize(4, 2).withFit(ImageFit.FILL));
+                        .withSize(4, 2).withFit(ImageFit.FILL), library);
             });
             context.waitTicks(20);
             context.runOnClient(client -> {
@@ -225,6 +225,44 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                     .orElse(false), TIMEOUT_TICKS);
             context.waitTicks(20);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-batch-apply"));
+
+            // v1.5: draft previews compose the unchanged master at the draft aspect ratio off-thread,
+            // without touching the atlas, and release their GPU texture when the editor closes.
+            long reloadsBeforePreview = com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount();
+            var preview = context.computeOnClient(client -> {
+                var entry = CustomPaintingsClient.library().library().get(1).orElseThrow();
+                byte[] png = CustomPaintingsClient.library().image(entry.slot()).orElseThrow();
+                var draftPreview = new com.jay.custompaintings.client.PaintingDraftPreview();
+                draftPreview.request(entry.withSize(4, 1).withFit(ImageFit.FILL), png);
+                return draftPreview;
+            });
+            context.waitFor(client -> preview.ready() || preview.error() != null, TIMEOUT_TICKS);
+            context.runOnClient(client -> {
+                if (preview.error() != null) {
+                    throw new AssertionError("Draft preview failed: " + preview.error());
+                }
+                if (preview.textureWidth() != preview.textureHeight() * 4) {
+                    throw new AssertionError("Draft preview must preserve the 4x1 canvas aspect ratio");
+                }
+                if (com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount() != reloadsBeforePreview) {
+                    throw new AssertionError("Draft previews must not request atlas reloads");
+                }
+                preview.close();
+            });
+
+            // Pending removals are reversible per slot until Apply.
+            context.runOnClient(client -> {
+                var library = CustomPaintingsClient.library().library();
+                var drafts = CustomPaintingsClient.drafts();
+                drafts.markRemoved(1, library);
+                if (!drafts.isRemoved(1) || drafts.removals(library).size() != 1) {
+                    throw new AssertionError("Removal should be staged locally");
+                }
+                drafts.discardSlot(1);
+                if (drafts.hasChanges(library) || library.count() != 2) {
+                    throw new AssertionError("Undoing a pending removal must restore the draft list without touching the server");
+                }
+            });
         }
     }
 

@@ -39,6 +39,10 @@ public final class ClientPaintingLibrary {
     /** Returns false for duplicate syncs so join/channel-registration/mutation events do not reload repeatedly. */
     public boolean apply(PaintingPayloads.Sync sync) {
         PaintingLibrary updatedLibrary = sync.library();
+        // TCP keeps one connection ordered, but ignore any stale snapshot defensively.
+        if (synced && updatedLibrary.revision() < library.revision()) {
+            return false;
+        }
         if (synced && canEdit == sync.canEdit() && library.equals(updatedLibrary)) {
             return false;
         }

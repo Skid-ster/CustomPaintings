@@ -47,6 +47,7 @@ public final class ClientPaintingNetwork {
         ClientPlayConnectionEvents.JOIN.register((listener, sender, client) ->
                 ClientPlayNetworking.send(new PaintingPayloads.SyncRequest(PaintingPayloads.SyncRequest.PROTOCOL_VERSION)));
         ClientPlayConnectionEvents.DISCONNECT.register((listener, client) -> {
+            imports.disconnect();
             drafts.discard();
             library.clear();
             PaintingLibraryAccess.set(library::library);

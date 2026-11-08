@@ -178,7 +178,7 @@ public final class PaintingLibraryStore {
     public synchronized void remove(int slot) throws IOException {
         PaintingEntry entry = library.get(slot).orElseThrow(() -> new IOException("Empty painting slot"));
         save(library.without(slot));
-        Files.deleteIfExists(imagePath(entry));
+        deleteAfterCommit(entry);
     }
 
     /** Upload several prepared master PNGs as one authoritative mutation and one manifest save. */
@@ -279,7 +279,17 @@ public final class PaintingLibraryStore {
                 .filter(entry -> removals.contains(entry.slot())).toList();
         save(new PaintingLibrary(library.revision() + 1, library.recipeSeed(), entries));
         for (PaintingEntry entry : removedEntries) {
+            deleteAfterCommit(entry);
+        }
+    }
+
+    /** The manifest is already committed; an orphan cleanup failure must not report a failed mutation. */
+    private void deleteAfterCommit(PaintingEntry entry) {
+        try {
             Files.deleteIfExists(imagePath(entry));
+        } catch (IOException exception) {
+            com.jay.custompaintings.CustomPaintingsMod.LOGGER.warn(
+                    "Removed painting slot {} from the library but could not delete its old master PNG", entry.slot(), exception);
         }
     }
 
