@@ -46,7 +46,13 @@ public final class PaintingDraftPreview implements AutoCloseable {
             loading = true;
             error = null;
         }
-        CompletableFuture.supplyAsync(() -> compose(entry, png), Util.ioPool())
+        CompletableFuture.supplyAsync(() -> {
+            try {
+                return compose(entry, png);
+            } catch (java.io.IOException exception) {
+                throw new java.util.concurrent.CompletionException(exception);
+            }
+        }, Util.ioPool())
                 .whenCompleteAsync((pixels, failure) -> {
                     synchronized (lock) {
                         if (closed || generation != requested) {
