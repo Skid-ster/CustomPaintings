@@ -386,7 +386,7 @@ public final class PaintingServerNetwork {
             int from = page * PaintingPayloads.ENTRIES_PER_PAGE;
             int to = Math.min(all.size(), from + PaintingPayloads.ENTRIES_PER_PAGE);
             ServerPlayNetworking.send(player, new PaintingPayloads.SyncPage(library.revision(),
-                    library.recipeSeed(), canEdit, page, pageCount, all.size(), all.subList(from, to)));
+                    library.recipeSeed(), library.nextId(), canEdit, page, pageCount, all.size(), all.subList(from, to)));
         }
     }
 

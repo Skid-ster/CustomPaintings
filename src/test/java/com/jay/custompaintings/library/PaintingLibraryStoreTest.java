@@ -54,6 +54,21 @@ class PaintingLibraryStoreTest {
     }
 
     @Test
+    void removedIdsRemainReservedAcrossManifestReloads() throws Exception {
+        PaintingLibraryStore store = new PaintingLibraryStore(temp);
+        store.load();
+        store.add("First", 1, 1, png(8, 4));
+        store.remove(0);
+        assertEquals(1, store.library().nextId());
+
+        PaintingLibraryStore reloaded = new PaintingLibraryStore(temp);
+        reloaded.load();
+        assertTrue(reloaded.library().entries().isEmpty());
+        assertEquals(1, reloaded.library().nextId());
+        assertEquals(1, reloaded.add("Second", 1, 1, png(8, 4)).id());
+    }
+
+    @Test
     void applyBatchSavesOncePreservesMastersAndIsAtomic() throws Exception {
         PaintingLibraryStore store = new PaintingLibraryStore(temp);
         store.load();

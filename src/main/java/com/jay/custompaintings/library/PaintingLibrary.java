@@ -9,17 +9,26 @@ import java.util.Set;
 
 /**
  * Immutable, <b>unbounded</b> library snapshot shared by the authoritative server and synced
- * clients. Ids are stable and never reused while a painting exists, so placed entities and
- * held items keep pointing at the right artwork.
+ * clients. Ids are stable and never reused, so placed entities and held items keep pointing
+ * at the same artwork even after the original entry is removed.
  */
-public record PaintingLibrary(long revision, long recipeSeed, List<PaintingEntry> entries) {
+public record PaintingLibrary(long revision, long recipeSeed, List<PaintingEntry> entries, int nextId) {
     public static final PaintingLibrary EMPTY = new PaintingLibrary(0, 0, List.of());
+
+    /** Creates a snapshot with its high-water mark inferred from the live entries. */
+    public PaintingLibrary(long revision, long recipeSeed, List<PaintingEntry> entries) {
+        this(revision, recipeSeed, entries, minimumNextId(entries));
+    }
 
     public PaintingLibrary {
         if (revision < 0) {
             throw new IllegalArgumentException("Revision cannot be negative");
         }
         entries = List.copyOf(entries);
+        int minimumNextId = minimumNextId(entries);
+        if (nextId < minimumNextId) {
+            throw new IllegalArgumentException("Next painting id cannot be below the library high-water mark");
+        }
         Set<Integer> ids = new HashSet<>();
         Set<String> recipes = new HashSet<>();
         for (PaintingEntry entry : entries) {
@@ -31,6 +40,17 @@ public record PaintingLibrary(long revision, long recipeSeed, List<PaintingEntry
             }
         }
         entries = entries.stream().sorted(Comparator.comparingInt(PaintingEntry::id)).toList();
+    }
+
+    private static int minimumNextId(List<PaintingEntry> entries) {
+        int maximum = -1;
+        for (PaintingEntry entry : entries) {
+            if (entry.id() == Integer.MAX_VALUE) {
+                throw new IllegalArgumentException("Painting id space is exhausted");
+            }
+            maximum = Math.max(maximum, entry.id());
+        }
+        return maximum + 1;
     }
 
     public Optional<PaintingEntry> get(int id) {
@@ -60,9 +80,9 @@ public record PaintingLibrary(long revision, long recipeSeed, List<PaintingEntry
         return entries.size();
     }
 
-    /** Next free id. Ids are not reused below the high-water mark while paintings exist. */
+    /** Next unused id, including ids reserved by entries that have since been removed. */
     public int nextId() {
-        return entries.isEmpty() ? 0 : entries.get(entries.size() - 1).id() + 1;
+        return nextId;
     }
 
     /**
@@ -89,9 +109,16 @@ public record PaintingLibrary(long revision, long recipeSeed, List<PaintingEntry
         if (isOccupied(entry.id())) {
             throw new IllegalArgumentException("Painting id already occupied");
         }
+        if (entry.id() < nextId) {
+            throw new IllegalArgumentException("Painting ids cannot be reused");
+        }
+        if (entry.id() == Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Painting id space is exhausted");
+        }
         List<PaintingEntry> updated = new ArrayList<>(entries);
         updated.add(entry);
-        return new PaintingLibrary(revision + 1, recipeSeed, updated);
+        return new PaintingLibrary(revision + 1, recipeSeed, updated,
+                Math.max(nextId, entry.id() + 1));
     }
 
     public PaintingLibrary withRenamed(int id, String name) {
@@ -110,11 +137,12 @@ public record PaintingLibrary(long revision, long recipeSeed, List<PaintingEntry
         if (!isOccupied(id)) {
             throw new IllegalArgumentException("Unknown painting id");
         }
-        return new PaintingLibrary(revision + 1, recipeSeed, entries.stream().filter(entry -> entry.id() != id).toList());
+        return new PaintingLibrary(revision + 1, recipeSeed,
+                entries.stream().filter(entry -> entry.id() != id).toList(), nextId);
     }
 
     private PaintingLibrary replace(PaintingEntry replacement) {
         return new PaintingLibrary(revision + 1, recipeSeed,
-                entries.stream().map(entry -> entry.id() == replacement.id() ? replacement : entry).toList());
+                entries.stream().map(entry -> entry.id() == replacement.id() ? replacement : entry).toList(), nextId);
     }
 }

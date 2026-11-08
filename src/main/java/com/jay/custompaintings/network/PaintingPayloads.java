@@ -62,12 +62,13 @@ public final class PaintingPayloads {
      * One page of the authoritative library. The client applies a revision only once every
      * page has arrived, so a large library never appears half-synced.
      */
-    public record SyncPage(long revision, long recipeSeed, boolean canEdit, int page, int pageCount,
+    public record SyncPage(long revision, long recipeSeed, int nextId, boolean canEdit, int page, int pageCount,
                            int total, List<EntryData> entries) implements CustomPacketPayload {
-        public static final Type<SyncPage> TYPE = new Type<>(CustomPaintingsMod.id("library_page_v4"));
+        public static final Type<SyncPage> TYPE = new Type<>(CustomPaintingsMod.id("library_page_v5"));
         public static final StreamCodec<RegistryFriendlyByteBuf, SyncPage> STREAM_CODEC = StreamCodec.composite(
                 ByteBufCodecs.VAR_LONG, SyncPage::revision,
                 ByteBufCodecs.VAR_LONG, SyncPage::recipeSeed,
+                ByteBufCodecs.VAR_INT, SyncPage::nextId,
                 ByteBufCodecs.BOOL, SyncPage::canEdit,
                 ByteBufCodecs.VAR_INT, SyncPage::page,
                 ByteBufCodecs.VAR_INT, SyncPage::pageCount,
@@ -83,7 +84,7 @@ public final class PaintingPayloads {
 
     /** Sent by the client once its play listener is ready, so login cannot race channel registration. */
     public record SyncRequest(int protocolVersion) implements CustomPacketPayload {
-        public static final int PROTOCOL_VERSION = 4;
+        public static final int PROTOCOL_VERSION = 5;
         public static final Type<SyncRequest> TYPE = new Type<>(CustomPaintingsMod.id("request_sync"));
         public static final StreamCodec<RegistryFriendlyByteBuf, SyncRequest> STREAM_CODEC =
                 StreamCodec.of((buf, request) -> buf.writeVarInt(request.protocolVersion()),

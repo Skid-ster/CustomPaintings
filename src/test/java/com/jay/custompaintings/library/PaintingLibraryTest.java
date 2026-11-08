@@ -65,6 +65,9 @@ class PaintingLibraryTest {
         // nextId never reuses a removed id, so old items in chests cannot silently change art.
         assertEquals(2, removed.nextId());
         assertFalse(removed.nextRecipe().isEmpty());
+        PaintingLibrary emptied = new PaintingLibrary(0, 7, List.of(entry(0, ""))).without(0);
+        assertEquals(1, emptied.nextId());
+        assertThrows(IllegalArgumentException.class, () -> emptied.withAdded(entry(0, "")));
         PaintingLibrary renamed = removed.withRenamed(1, "New Name");
         assertEquals("New Name", renamed.get(1).orElseThrow().name());
         assertEquals("Painting 1", library.get(1).orElseThrow().name());

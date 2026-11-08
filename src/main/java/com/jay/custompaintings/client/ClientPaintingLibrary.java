@@ -44,6 +44,7 @@ public final class ClientPaintingLibrary {
 
     private long pendingRevision = -1;
     private long pendingSeed;
+    private int pendingNextId;
     private boolean pendingCanEdit;
     private int pendingTotal;
     private int pendingPageCount;
@@ -84,6 +85,7 @@ public final class ClientPaintingLibrary {
         if (page.revision() != pendingRevision) {
             pendingRevision = page.revision();
             pendingSeed = page.recipeSeed();
+            pendingNextId = page.nextId();
             pendingCanEdit = page.canEdit();
             pendingTotal = page.total();
             pendingPageCount = page.pageCount();
@@ -111,7 +113,7 @@ public final class ClientPaintingLibrary {
         }
         PaintingLibrary updated;
         try {
-            updated = new PaintingLibrary(pendingRevision, pendingSeed, entries);
+            updated = new PaintingLibrary(pendingRevision, pendingSeed, entries, pendingNextId);
         } catch (RuntimeException exception) {
             CustomPaintingsMod.LOGGER.warn("Ignoring inconsistent painting library", exception);
             pendingPages.clear();

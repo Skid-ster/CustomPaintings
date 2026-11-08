@@ -86,12 +86,14 @@ public final class PaintingLibraryStore {
             JsonObject json = JsonParser.parseReader(reader).getAsJsonObject();
             long revision = json.get("revision").getAsLong();
             long seed = json.get("recipe_seed").getAsLong();
+            boolean hasNextId = json.has("next_id");
+            int nextId = hasNextId ? json.get("next_id").getAsInt() : 0;
             JsonArray array = json.getAsJsonArray("entries");
             if (array.size() > MAX_MANIFEST_ENTRIES) {
                 throw new IOException("Painting manifest is implausibly large");
             }
             List<PaintingEntry> entries = new ArrayList<>();
-            boolean migrated = false;
+            boolean migrated = !hasNextId;
             for (JsonElement element : array) {
                 JsonObject object = element.getAsJsonObject();
                 // v1.x wrote "slot" and slot_N.png; v2 writes "id" and painting_N.png.
@@ -117,7 +119,10 @@ public final class PaintingLibraryStore {
                 verifyImage(entry);
                 entries.add(entry);
             }
-            PaintingLibrary loaded = new PaintingLibrary(revision, seed, entries);
+            if (!hasNextId) {
+                nextId = new PaintingLibrary(revision, seed, entries).nextId();
+            }
+            PaintingLibrary loaded = new PaintingLibrary(revision, seed, entries, nextId);
             if (migrated) {
                 // Reassign valid wood/dye recipes to any painting that lost its legacy recipe.
                 loaded = reassignRecipes(loaded);
@@ -143,9 +148,9 @@ public final class PaintingLibraryStore {
             String recipe = working.nextRecipe();
             PaintingEntry updated = entry.withRecipe(recipe);
             entries.add(updated);
-            working = new PaintingLibrary(source.revision(), source.recipeSeed(), entries);
+            working = new PaintingLibrary(source.revision(), source.recipeSeed(), entries, source.nextId());
         }
-        return new PaintingLibrary(source.revision(), source.recipeSeed(), entries);
+        return new PaintingLibrary(source.revision(), source.recipeSeed(), entries, source.nextId());
     }
 
     private void renameLegacyImage(int id, String legacyName) throws IOException {
@@ -215,7 +220,8 @@ public final class PaintingLibraryStore {
 
     private void ensureSeed() {
         if (library.recipeSeed() == 0) {
-            library = new PaintingLibrary(library.revision(), new SecureRandom().nextLong(), library.entries());
+            library = new PaintingLibrary(library.revision(), new SecureRandom().nextLong(),
+                    library.entries(), library.nextId());
         }
     }
 
@@ -295,7 +301,7 @@ public final class PaintingLibraryStore {
                 added.add(entry);
                 entries.add(entry);
             }
-            save(new PaintingLibrary(library.revision() + 1, library.recipeSeed(), entries));
+            save(new PaintingLibrary(library.revision() + 1, library.recipeSeed(), entries, nextId));
             return List.copyOf(added);
         } catch (IOException | RuntimeException exception) {
             for (PaintingEntry entry : added) {
@@ -357,7 +363,7 @@ public final class PaintingLibraryStore {
         }
         List<PaintingEntry> removedEntries = library.entries().stream()
                 .filter(entry -> removedIds.contains(entry.id())).toList();
-        save(new PaintingLibrary(library.revision() + 1, library.recipeSeed(), entries));
+        save(new PaintingLibrary(library.revision() + 1, library.recipeSeed(), entries, library.nextId()));
         for (PaintingEntry entry : removedEntries) {
             deleteAfterCommit(entry);
         }
@@ -439,6 +445,7 @@ public final class PaintingLibraryStore {
         json.addProperty("format", 2);
         json.addProperty("revision", updated.revision());
         json.addProperty("recipe_seed", updated.recipeSeed());
+        json.addProperty("next_id", updated.nextId());
         JsonArray entries = new JsonArray();
         for (PaintingEntry entry : updated.entries()) {
             JsonObject object = new JsonObject();
