@@ -384,8 +384,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
 
     private static void takeFromMenu(ClientGameTestContext context, TestSingleplayerContext world,
                                      int paintingId, int count) {
-        ServerPlayer player = world.getConnection().getServerPlayer();
-        world.getServer().runOnServer(server -> player.getInventory().clearContent());
+        world.getServer().runOnServer(server -> world.getConnection().getServerPlayer().getInventory().clearContent());
         context.runOnClient(client -> {
             if (!CustomPaintingsClient.imports().givePainting(paintingId, count)) {
                 throw new AssertionError("Painting Menu request did not start");
@@ -393,6 +392,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
         });
         context.waitFor(client -> !CustomPaintingsClient.imports().state().busy(), TIMEOUT_TICKS);
         world.getServer().computeOnServer(server -> {
+            ServerPlayer player = world.getConnection().getServerPlayer();
             int found = 0;
             for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
                 if (CustomPaintingItems.isCustomPainting(stack)
