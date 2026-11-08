@@ -86,8 +86,10 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             UUID placedId = placed.getUUID();
             // Paintings use noUpdateInterval(), so waitForClientboundEntityUpdates would hang.
             world.getConnection().waitForClientboundPackets();
-            context.waitFor(client -> client.level.getEntity(placedId) instanceof Painting, TIMEOUT_TICKS);
+            context.waitFor(client -> client.level.getEntity(placedId) instanceof Painting painting
+                    && PaintingData.entityPaintingId(painting).orElse(-1) == firstId, TIMEOUT_TICKS);
             lookAt(context, placedId);
+            assertArtworkUploaded(context, firstId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-placed"));
 
             // The Painting Menu must hand out the same component-carrying item.
@@ -133,6 +135,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                     && PaintingData.entityPaintingId(painting).orElse(-1) == relogId, TIMEOUT_TICKS);
             assertPreviewUploaded(context, relogId);
             lookAt(context, persistedPaintingId);
+            assertArtworkUploaded(context, relogId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-relogged"));
 
             // v2 replaces the resource reload with a cheap metadata sync + texture invalidation.
@@ -144,6 +147,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             });
             context.waitFor(client -> CustomPaintingsClient.paintings().generation() > generation
                     && CustomPaintingsClient.paintings().preview(relogId) != null, TIMEOUT_TICKS);
+            assertArtworkUploaded(context, relogId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-after-reload"));
 
             // Auto-size from image proportions and preserve alpha.
@@ -162,6 +166,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             reopened.getConnection().waitForClientboundPackets();
             context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting, TIMEOUT_TICKS);
             lookAt(context, wideId);
+            assertArtworkUploaded(context, wideEntryId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-wide-alpha"));
 
             edit(context, wideEntryId, "Large Mural", 8, 8, ImageFit.FILL);
@@ -171,6 +176,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                     .map(key -> key.identifier().equals(PaintingRuntime.variantId(8, 8)))
                     .orElse(false), TIMEOUT_TICKS);
             context.waitTicks(20);
+            assertArtworkUploaded(context, wideEntryId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-8x8-fill"));
 
             // Batch Apply across two paintings: one revision, no resource reload.
@@ -222,6 +228,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                 }
             });
             context.waitTicks(20);
+            assertArtworkUploaded(context, wideEntryId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-batch-apply"));
 
             // Draft previews compose off-thread and never touch the shared textures.
@@ -420,6 +427,10 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                 throw new AssertionError("Item name should come from the painting entry");
             }
         });
+    }
+
+    private static void assertArtworkUploaded(ClientGameTestContext context, int paintingId) {
+        context.waitFor(client -> CustomPaintingsClient.paintings().artwork(paintingId) != null, TIMEOUT_TICKS);
     }
 
     private static void assertPreviewUploaded(ClientGameTestContext context, int paintingId) {
