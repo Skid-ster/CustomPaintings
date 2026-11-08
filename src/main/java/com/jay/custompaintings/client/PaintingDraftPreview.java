@@ -61,7 +61,7 @@ public final class PaintingDraftPreview implements AutoCloseable {
                         loading = false;
                         if (failure != null) {
                             error = failure.getCause() == null ? failure.getMessage() : failure.getCause().getMessage();
-                            CustomPaintingsMod.LOGGER.warn("Could not preview draft for slot {}", entry.slot(), failure);
+                            CustomPaintingsMod.LOGGER.warn("Could not preview draft for painting {}", entry.id(), failure);
                             return;
                         }
                         try {
@@ -74,7 +74,7 @@ public final class PaintingDraftPreview implements AutoCloseable {
                             minecraft.getTextureManager().register(id, replacement);
                         } catch (RuntimeException exception) {
                             error = exception.getMessage();
-                            CustomPaintingsMod.LOGGER.warn("Could not upload draft preview for slot {}", entry.slot(), exception);
+                            CustomPaintingsMod.LOGGER.warn("Could not upload draft preview for painting {}", entry.id(), exception);
                         }
                     }
                 }, minecraft);

@@ -11,8 +11,8 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PaintingDraftsTest {
-    private static PaintingEntry entry(int slot, String name, int width, int height, ImageFit fit, String recipe) {
-        return new PaintingEntry(slot, name, width, height, fit, "slot_" + slot + ".png",
+    private static PaintingEntry entry(int id, String name, int width, int height, ImageFit fit, String recipe) {
+        return new PaintingEntry(id, name, width, height, fit, PaintingEntry.imageFileFor(id),
                 "a".repeat(64), recipe);
     }
 
@@ -22,8 +22,8 @@ class PaintingDraftsTest {
 
     @Test
     void stagingSeveralPaintingsDoesNotChangeTheAppliedLibrary() {
-        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "paper_black");
-        PaintingEntry second = entry(1, "Second", 1, 1, ImageFit.FIT, "paper_blue");
+        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "oak_red");
+        PaintingEntry second = entry(1, "Second", 1, 1, ImageFit.FIT, "oak_blue");
         PaintingLibrary applied = library(first, second);
         PaintingDrafts drafts = new PaintingDrafts();
 
@@ -42,7 +42,7 @@ class PaintingDraftsTest {
 
     @Test
     void discardAndRevertRemovePendingChanges() {
-        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "paper_black");
+        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "oak_red");
         PaintingLibrary applied = library(first);
         PaintingDrafts drafts = new PaintingDrafts();
         drafts.stage(first.withSize(3, 3), applied);
@@ -51,7 +51,7 @@ class PaintingDraftsTest {
         assertEquals(List.of(0), drafts.removals(applied));
         assertTrue(drafts.changes(applied).isEmpty());
 
-        drafts.discardSlot(0);
+        drafts.discardPainting(0);
         assertFalse(drafts.hasChanges(applied));
         drafts.stage(first.withSize(4, 4), applied);
         drafts.discard();
@@ -60,20 +60,20 @@ class PaintingDraftsTest {
 
     @Test
     void syncDropsStaleDraftsButKeepsCompatibleOnes() {
-        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "paper_black");
-        PaintingEntry second = entry(1, "Second", 1, 1, ImageFit.FIT, "paper_blue");
+        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "oak_red");
+        PaintingEntry second = entry(1, "Second", 1, 1, ImageFit.FIT, "oak_blue");
         PaintingDrafts drafts = new PaintingDrafts();
         PaintingLibrary applied = library(first, second);
         drafts.stage(first.withSize(8, 8), applied);
         drafts.stage(second.withName("Renamed"), applied);
 
         PaintingEntry replacedSecond = new PaintingEntry(1, "Server", 1, 1, ImageFit.FIT,
-                "slot_1.png", "b".repeat(64), "paper_blue");
+                PaintingEntry.imageFileFor(1), "b".repeat(64), "oak_blue");
         PaintingLibrary updated = new PaintingLibrary(8, 123, List.of(first, replacedSecond));
         drafts.onSync(updated);
 
         assertEquals(1, drafts.changeCount(updated));
-        assertEquals(0, drafts.changes(updated).getFirst().slot());
+        assertEquals(0, drafts.changes(updated).getFirst().id());
         assertEquals(1, drafts.conflictCount());
         drafts.clearConflicts();
         assertEquals(0, drafts.conflictCount());
@@ -81,7 +81,7 @@ class PaintingDraftsTest {
 
     @Test
     void applyingIdenticalServerStateClearsDraftsWithoutConflict() {
-        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "paper_black");
+        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "oak_red");
         PaintingDrafts drafts = new PaintingDrafts();
         drafts.stage(first.withSize(8, 8), library(first));
         PaintingLibrary applied = library(first.withSize(8, 8));
@@ -92,7 +92,7 @@ class PaintingDraftsTest {
 
     @Test
     void metadataOnlyServerEditIsAConflictEvenWithTheSameImage() {
-        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "paper_black");
+        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "oak_red");
         PaintingLibrary applied = library(first);
         PaintingDrafts drafts = new PaintingDrafts();
         drafts.stage(first.withName("Local"), applied);
@@ -106,8 +106,8 @@ class PaintingDraftsTest {
 
     @Test
     void unrelatedServerEditsKeepCompatibleDrafts() {
-        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "paper_black");
-        PaintingEntry second = entry(1, "Second", 1, 1, ImageFit.FIT, "paper_blue");
+        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "oak_red");
+        PaintingEntry second = entry(1, "Second", 1, 1, ImageFit.FIT, "oak_blue");
         PaintingLibrary applied = library(first, second);
         PaintingDrafts drafts = new PaintingDrafts();
         drafts.stage(first.withName("Local"), applied);
@@ -121,8 +121,8 @@ class PaintingDraftsTest {
 
     @Test
     void successfulApplyAcknowledgesOnlyTheSubmittedBatch() {
-        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "paper_black");
-        PaintingEntry second = entry(1, "Second", 1, 1, ImageFit.FIT, "paper_blue");
+        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "oak_red");
+        PaintingEntry second = entry(1, "Second", 1, 1, ImageFit.FIT, "oak_blue");
         PaintingLibrary applied = library(first, second);
         PaintingDrafts drafts = new PaintingDrafts();
         PaintingEdit submitted = new PaintingEdit(0, "Applied", 2, 2, ImageFit.FIT);
@@ -137,14 +137,14 @@ class PaintingDraftsTest {
     }
 
     @Test
-    void pendingRemovalConflictsWhenTheSlotWasReplaced() {
-        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "paper_black");
+    void pendingRemovalConflictsWhenThePaintingWasReplaced() {
+        PaintingEntry first = entry(0, "First", 2, 2, ImageFit.FIT, "oak_red");
         PaintingLibrary applied = library(first);
         PaintingDrafts drafts = new PaintingDrafts();
         drafts.markRemoved(0, applied);
 
         PaintingEntry replaced = new PaintingEntry(0, "Replacement", 2, 2, ImageFit.FIT,
-                "slot_0.png", "b".repeat(64), "paper_black");
+                PaintingEntry.imageFileFor(0), "b".repeat(64), "oak_red");
         PaintingLibrary updated = new PaintingLibrary(8, 123, List.of(replaced));
         drafts.onSync(updated);
 

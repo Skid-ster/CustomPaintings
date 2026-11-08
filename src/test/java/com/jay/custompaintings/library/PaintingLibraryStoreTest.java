@@ -26,7 +26,7 @@ class PaintingLibraryStoreTest {
         PaintingLibraryStore store = new PaintingLibraryStore(temp);
         store.load();
         PaintingEntry entry = store.add("Sunset", 2, 1, ImageFit.FILL, png(64, 32));
-        assertEquals(0, entry.slot());
+        assertEquals(0, entry.id());
         assertEquals(ImageFit.FILL, entry.fit());
         assertTrue(Files.exists(store.imagePath(entry)));
         assertTrue(Files.exists(temp.resolve("library.json")));
@@ -40,17 +40,32 @@ class PaintingLibraryStoreTest {
     }
 
     @Test
-    void enforcesCapAndRejectsInvalidMasters() throws Exception {
+    void acceptsMoreThanTenPaintingsAndRejectsInvalidMasters() throws Exception {
         PaintingLibraryStore store = new PaintingLibraryStore(temp);
         store.load();
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 25; i++) {
             store.add("Painting " + i, 1, 1, png(8, 4));
         }
-        assertThrows(java.io.IOException.class, () -> store.add("One too many", 1, 1, png(8, 4)));
+        assertEquals(25, store.library().count());
         PaintingLibraryStore other = new PaintingLibraryStore(temp.resolve("other"));
         other.load();
         assertThrows(java.io.IOException.class, () -> other.add("Bad", 9, 1, png(8, 4)));
         assertThrows(java.io.IOException.class, () -> other.add("Corrupt", 1, 1, new byte[]{1, 2, 3}));
+    }
+
+    @Test
+    void removedIdsRemainReservedAcrossManifestReloads() throws Exception {
+        PaintingLibraryStore store = new PaintingLibraryStore(temp);
+        store.load();
+        store.add("First", 1, 1, png(8, 4));
+        store.remove(0);
+        assertEquals(1, store.library().nextId());
+
+        PaintingLibraryStore reloaded = new PaintingLibraryStore(temp);
+        reloaded.load();
+        assertTrue(reloaded.library().entries().isEmpty());
+        assertEquals(1, reloaded.library().nextId());
+        assertEquals(1, reloaded.add("Second", 1, 1, png(8, 4)).id());
     }
 
     @Test
@@ -103,8 +118,8 @@ class PaintingLibraryStoreTest {
                 new PaintingLibraryStore.Upload("Two", 1, 2, ImageFit.FILL, png(32, 64))));
         assertEquals(2, added.size());
         assertEquals(1, store.library().revision());
-        assertEquals(0, added.get(0).slot());
-        assertEquals(1, added.get(1).slot());
+        assertEquals(0, added.get(0).id());
+        assertEquals(1, added.get(1).id());
         assertEquals(ImageFit.FILL, store.library().get(1).orElseThrow().fit());
         assertThrows(java.io.IOException.class, () -> store.addBatch(List.of(
                 new PaintingLibraryStore.Upload("Bad", 1, 1, ImageFit.FIT, new byte[]{1, 2, 3}))));

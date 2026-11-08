@@ -1,38 +1,73 @@
 package com.jay.custompaintings.library;
 
+import com.jay.custompaintings.image.ImageFit;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class PaintingLibraryTest {
-    private static PaintingEntry entry(int slot, String recipe) {
-        return new PaintingEntry(slot, "Painting " + slot, 2, 2, "slot_" + slot + ".png", "a".repeat(64), recipe);
+    private static PaintingEntry entry(int id, String recipe) {
+        return new PaintingEntry(id, "Painting " + id, 2, 2, ImageFit.FIT,
+                PaintingEntry.imageFileFor(id), "a".repeat(64), recipe);
     }
 
     @Test
-    void enforcesTenSlotCapAndUniqueSlots() {
+    void supportsFarMoreThanTheRecipeCatalogue() {
+        // The old design stopped at 10 paintings. Now only the finite recipe pool runs out.
         PaintingLibrary library = new PaintingLibrary(1, 42, List.of());
-        for (int slot = 0; slot < 10; slot++) {
-            library = library.withAdded(entry(slot, RecipeCatalog.RECIPES.get(slot).id()));
+        for (int id = 0; id < 500; id++) {
+            library = library.withAdded(entry(id, ""));
         }
-        assertEquals(10, library.count());
-        assertEquals(0, library.freeSlots());
-        assertTrue(library.firstFreeSlot().isEmpty());
-        PaintingLibrary full = library;
-        assertThrows(IllegalArgumentException.class, () -> full.withAdded(entry(0, "paper_black")));
-        assertThrows(IllegalArgumentException.class, () -> new PaintingLibrary(0, 0,
-                java.util.stream.IntStream.range(0, 11).mapToObj(i -> entry(i % 10, RecipeCatalog.RECIPES.get(i % 10).id())).toList()));
+        assertEquals(500, library.count());
+        assertEquals(500, library.nextId());
+        for (int id = 0; id < 500; id++) {
+            assertEquals(id, library.get(id).orElseThrow().id());
+        }
+        assertTrue(library.entries().stream().noneMatch(PaintingEntry::hasRecipe));
     }
 
     @Test
-    void reusesFreedSlotsAndRenamesImmutably() {
-        PaintingLibrary library = new PaintingLibrary(0, 7, List.of(entry(0, "paper_black"), entry(1, "paper_blue")));
+    void assignsRecipesUntilTheCatalogueIsExhaustedThenStopsAssigning() {
+        PaintingLibrary library = new PaintingLibrary(1, 42, List.of());
+        for (int id = 0; id < RecipeCatalog.size(); id++) {
+            library = library.withAdded(entry(id, library.nextRecipe()));
+        }
+        assertEquals(RecipeCatalog.size(), library.count());
+        assertEquals(RecipeCatalog.size(), library.entries().stream().filter(PaintingEntry::hasRecipe).count());
+        assertEquals("", library.nextRecipe());
+        // Painting number 193 still uploads; it simply has no crafting recipe.
+        library = library.withAdded(entry(RecipeCatalog.size(), library.nextRecipe()));
+        assertEquals(RecipeCatalog.size() + 1, library.count());
+        assertFalse(library.get(RecipeCatalog.size()).orElseThrow().hasRecipe());
+    }
+
+    @Test
+    void rejectsDuplicateIdsAndRecipesButNotLargeIds() {
+        PaintingLibrary library = new PaintingLibrary(0, 7, List.of(entry(4, "oak_red")));
+        assertThrows(IllegalArgumentException.class, () -> library.withAdded(entry(4, "oak_blue")));
+        assertThrows(IllegalArgumentException.class, () -> library.withAdded(entry(5, "oak_red")));
+        assertThrows(IllegalArgumentException.class, () -> entry(-1, ""));
+        // Huge sparse ids are legal: nothing is allocated per id.
+        PaintingLibrary sparse = new PaintingLibrary(0, 7, List.of(entry(1_000_000, "")));
+        assertEquals(1_000_001, sparse.nextId());
+        assertEquals(1_000_000, sparse.get(1_000_000).orElseThrow().id());
+    }
+
+    @Test
+    void removalFreesTheRecipeAndIdsKeepIncreasing() {
+        PaintingLibrary library = new PaintingLibrary(0, 7, List.of(entry(0, "oak_red"), entry(1, "oak_blue")));
         PaintingLibrary removed = library.without(0);
-        assertEquals(0, removed.firstFreeSlot().orElseThrow());
+        assertEquals(1, removed.count());
+        assertTrue(removed.get(0).isEmpty());
+        // nextId never reuses a removed id, so old items in chests cannot silently change art.
+        assertEquals(2, removed.nextId());
+        assertFalse(removed.nextRecipe().isEmpty());
+        PaintingLibrary emptied = new PaintingLibrary(0, 7, List.of(entry(0, ""))).without(0);
+        assertEquals(1, emptied.nextId());
+        assertThrows(IllegalArgumentException.class, () -> emptied.withAdded(entry(0, "")));
         PaintingLibrary renamed = removed.withRenamed(1, "New Name");
         assertEquals("New Name", renamed.get(1).orElseThrow().name());
         assertEquals("Painting 1", library.get(1).orElseThrow().name());
@@ -43,8 +78,8 @@ class PaintingLibraryTest {
     void randomRecipeAssignmentIsUniqueAndStable() {
         List<String> first = RecipeCatalog.shuffledIds(123);
         assertEquals(first, RecipeCatalog.shuffledIds(123));
-        assertEquals(10, first.size());
-        assertEquals(10, new HashSet<>(first).size());
+        assertEquals(RecipeCatalog.size(), first.size());
+        assertEquals(RecipeCatalog.size(), new HashSet<>(first).size());
         assertNotEquals(first, RecipeCatalog.shuffledIds(456));
     }
 
@@ -58,8 +93,24 @@ class PaintingLibraryTest {
         assertTrue(PaintingSizes.isSupported(5, 1));
         assertTrue(PaintingSizes.isSupported(8, 8));
         assertFalse(PaintingSizes.isSupported(9, 1));
-        assertThrows(IllegalArgumentException.class, () -> entry(10, "paper_black"));
-        assertThrows(IllegalArgumentException.class, () -> new PaintingEntry(0, "X", 2, 2, "slot_1.png", "a".repeat(64), "paper_black"));
+        assertThrows(IllegalArgumentException.class,
+                () -> new PaintingEntry(0, "X", 2, 2, ImageFit.FIT, "painting_1.png", "a".repeat(64), ""));
+        assertThrows(IllegalArgumentException.class,
+                () -> new PaintingEntry(0, "X", 2, 2, ImageFit.FIT, "painting_0.png", "a".repeat(64), "paper_black"));
     }
 
+    @Test
+    void editAppliesAllFieldsAtOnceAndBumpsRevisionOnce() {
+        PaintingLibrary library = new PaintingLibrary(5, 7, List.of(entry(0, "oak_red")));
+        PaintingEntry original = library.get(0).orElseThrow();
+        PaintingEdit edit = new PaintingEdit(0, "Renamed", 5, 2, ImageFit.FILL);
+        PaintingLibrary updated = library.withReplaced(edit.applyTo(original));
+        PaintingEntry entry = updated.get(0).orElseThrow();
+        assertEquals("Renamed", entry.name());
+        assertEquals(5, entry.width());
+        assertEquals(2, entry.height());
+        assertEquals(ImageFit.FILL, entry.fit());
+        assertEquals(6, updated.revision());
+        assertEquals("a".repeat(64), entry.sha256(), "an edit must not change the artwork hash");
+    }
 }

@@ -5,43 +5,70 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Guards the exact sprite ids consumed by Minecraft's painting renderer and item models. */
+/**
+ * Guards the size-only variant catalogue and the wood/dye recipe catalogue. There are no
+ * per-painting assets any more: artwork is a dynamic texture keyed by painting id.
+ */
 class PaintingAssetIdsTest {
     private static final Path RESOURCES = Path.of("src", "main", "resources");
 
     @Test
-    void everyVariantAssetIdMatchesTheInjectedPaintingSpriteId() throws Exception {
+    void exactlySixtyFourSizeVariantsShareOnePlaceholderAsset() throws Exception {
         Path variants = RESOURCES.resolve("resourcepacks/library/data/custompaintings/painting_variant");
-        int checked = 0;
-        for (int slot = 0; slot < 10; slot++) {
-            for (PaintingSizes.Size size : PaintingSizes.PRESETS) {
-                String id = "slot_" + slot + "_" + size.width() + "x" + size.height();
-                Path file = variants.resolve(id + ".json");
-                assertTrue(Files.isRegularFile(file), file.toString());
-                var json = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
-                assertEquals("custompaintings:" + id, json.get("asset_id").getAsString());
-                assertEquals(size.width(), json.get("width").getAsInt());
-                assertEquals(size.height(), json.get("height").getAsInt());
-                checked++;
-            }
+        Set<String> expected = new HashSet<>();
+        for (PaintingSizes.Size size : PaintingSizes.PRESETS) {
+            String id = "canvas_" + size.width() + "x" + size.height();
+            expected.add(id + ".json");
+            Path file = variants.resolve(id + ".json");
+            assertTrue(Files.isRegularFile(file), file.toString());
+            var json = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            assertEquals("custompaintings:canvas", json.get("asset_id").getAsString());
+            assertEquals(size.width(), json.get("width").getAsInt());
+            assertEquals(size.height(), json.get("height").getAsInt());
         }
-        assertEquals(640, checked);
+        try (var files = Files.list(variants)) {
+            assertEquals(expected, files.map(path -> path.getFileName().toString())
+                    .collect(java.util.stream.Collectors.toSet()));
+        }
+        assertTrue(Files.isRegularFile(RESOURCES.resolve("assets/custompaintings/textures/painting/canvas.png")));
     }
 
     @Test
-    void everyItemModelUsesTheInjectedItemSpriteId() throws Exception {
-        for (int slot = 0; slot < 10; slot++) {
-            Path item = RESOURCES.resolve("assets/custompaintings/items/slot_" + slot + ".json");
-            Path model = RESOURCES.resolve("assets/custompaintings/models/item/slot_" + slot + ".json");
-            var itemJson = JsonParser.parseString(Files.readString(item)).getAsJsonObject();
-            assertEquals("custompaintings:item/slot_" + slot,
-                    itemJson.getAsJsonObject("model").get("model").getAsString());
-            var modelJson = JsonParser.parseString(Files.readString(model)).getAsJsonObject();
-            assertEquals("custompaintings:item/slot_" + slot,
-                    modelJson.getAsJsonObject("textures").get("layer0").getAsString());
+    void oneItemModelBacksEveryPainting() throws Exception {
+        Path items = RESOURCES.resolve("assets/custompaintings/items");
+        try (var files = Files.list(items)) {
+            assertEquals(Set.of("painting.json"), files.map(path -> path.getFileName().toString())
+                    .collect(java.util.stream.Collectors.toSet()));
+        }
+        var itemJson = JsonParser.parseString(Files.readString(items.resolve("painting.json"))).getAsJsonObject();
+        assertEquals("custompaintings:item/painting", itemJson.getAsJsonObject("model").get("model").getAsString());
+    }
+
+    @Test
+    void recipeFilesCoverTheWholeCatalogueExactlyOnce() throws Exception {
+        Path recipes = RESOURCES.resolve("resourcepacks/library/data/custompaintings/recipe");
+        Set<String> expected = new HashSet<>();
+        for (int index = 0; index < RecipeCatalog.RECIPES.size(); index++) {
+            RecipeCatalog.EasyRecipe recipe = RecipeCatalog.RECIPES.get(index);
+            String file = RecipeCatalog.recipePath(index) + ".json";
+            expected.add(file);
+            var json = JsonParser.parseString(Files.readString(recipes.resolve(file))).getAsJsonObject();
+            assertEquals("custompaintings:painting_recipe", json.get("type").getAsString());
+            assertEquals(recipe.id(), json.get("recipe").getAsString());
+            assertEquals(2, recipe.ingredients().size());
+            for (String ingredient : recipe.ingredients()) {
+                assertTrue(ingredient.startsWith("minecraft:"), ingredient);
+            }
+        }
+        assertEquals(192, RecipeCatalog.size());
+        try (var files = Files.list(recipes)) {
+            assertEquals(expected, files.map(path -> path.getFileName().toString())
+                    .collect(java.util.stream.Collectors.toSet()));
         }
     }
 }

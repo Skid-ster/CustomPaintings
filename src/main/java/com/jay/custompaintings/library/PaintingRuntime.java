@@ -1,63 +1,64 @@
 package com.jay.custompaintings.library;
 
+import com.jay.custompaintings.CustomPaintingsMod;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.decoration.painting.PaintingVariant;
+import net.minecraft.world.item.Item;
 
 import java.util.Optional;
 
-/** Shared identifiers and registry helpers for the ten fixed custom-painting slots. */
+/**
+ * Identifiers for the unbounded painting system.
+ *
+ * <p>Registries are frozen at startup, so instead of one item and 64 variants <i>per painting</i>
+ * there is exactly <b>one</b> item ({@code custompaintings:painting}) whose stack carries the
+ * painting id as a data component, and <b>64 size-only</b> variants ({@code canvas_WxH}) that
+ * provide the entity's bounding box. The artwork itself comes from a per-id dynamic texture,
+ * so adding paintings never touches a registry or an atlas.</p>
+ */
 public final class PaintingRuntime {
+    /** Shared placeholder atlas asset for every canvas variant; the renderer overrides it. */
+    public static final Identifier CANVAS_ASSET = CustomPaintingsMod.id("canvas");
+
     private PaintingRuntime() {
     }
 
-    public static Identifier variantId(int slot, int width, int height) {
-        return Identifier.fromNamespaceAndPath("custompaintings", "slot_" + slot + "_" + width + "x" + height);
+    public static Identifier itemId() {
+        return CustomPaintingsMod.id("painting");
     }
 
-    public static ResourceKey<PaintingVariant> variantKey(int slot, int width, int height) {
-        return ResourceKey.create(Registries.PAINTING_VARIANT, variantId(slot, width, height));
+    public static ResourceKey<Item> itemKey() {
+        return ResourceKey.create(Registries.ITEM, itemId());
     }
 
-    public static Identifier variantAssetId(int slot, int width, int height) {
-        return variantId(slot, width, height);
+    public static Identifier variantId(int width, int height) {
+        return CustomPaintingsMod.id("canvas_" + width + "x" + height);
     }
 
-    public static Identifier itemId(int slot) {
-        return Identifier.fromNamespaceAndPath("custompaintings", "slot_" + slot);
+    public static ResourceKey<PaintingVariant> variantKey(int width, int height) {
+        return ResourceKey.create(Registries.PAINTING_VARIANT, variantId(width, height));
     }
 
-    public static ResourceKey<net.minecraft.world.item.Item> itemKey(int slot) {
-        return ResourceKey.create(Registries.ITEM, itemId(slot));
+    public static Optional<PaintingVariant> variant(Registry<PaintingVariant> registry, int width, int height) {
+        return registry.getOptional(variantKey(width, height));
     }
 
-    public static Identifier itemTextureId(int slot) {
-        return Identifier.fromNamespaceAndPath("custompaintings", "item/slot_" + slot);
+    /** True for our size-only canvas variants (and legacy v1.x slot variants during migration). */
+    public static boolean isCustomVariant(Identifier id) {
+        return id.getNamespace().equals(CustomPaintingsMod.MOD_ID)
+                && (id.getPath().startsWith("canvas_") || id.getPath().startsWith("slot_"));
     }
 
-    public static Optional<Integer> slotFromVariant(Identifier id) {
-        if (!id.getNamespace().equals("custompaintings")) {
-            return Optional.empty();
-        }
-        String path = id.getPath();
-        if (!path.startsWith("slot_")) {
-            return Optional.empty();
-        }
-        int underscore = path.indexOf('_', 5);
-        if (underscore < 0) {
-            return Optional.empty();
-        }
-        try {
-            int slot = Integer.parseInt(path.substring(5, underscore));
-            return slot >= 0 && slot < PaintingEntry.MAX_PAINTINGS ? Optional.of(slot) : Optional.empty();
-        } catch (NumberFormatException exception) {
-            return Optional.empty();
-        }
+    /** Per-painting dynamic texture used by the world renderer. */
+    public static Identifier artworkTexture(int id) {
+        return CustomPaintingsMod.id("artwork/" + id);
     }
 
-    public static Optional<PaintingVariant> variant(Registry<PaintingVariant> registry, PaintingEntry entry) {
-        return registry.getOptional(variantKey(entry.slot(), entry.width(), entry.height()));
+    /** Per-painting dynamic texture used for item icons and menu previews. */
+    public static Identifier previewTexture(int id) {
+        return CustomPaintingsMod.id("preview/" + id);
     }
 }

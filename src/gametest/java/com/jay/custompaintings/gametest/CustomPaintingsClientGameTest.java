@@ -1,9 +1,18 @@
 package com.jay.custompaintings.gametest;
 
+import com.jay.custompaintings.client.ClientPaintingLibrary;
 import com.jay.custompaintings.client.CustomPaintingsClient;
+import com.jay.custompaintings.client.PaintingDraftPreview;
+import com.jay.custompaintings.client.PaintingDrafts;
+import com.jay.custompaintings.client.PaintingTextureManager;
 import com.jay.custompaintings.image.ImageFit;
+import com.jay.custompaintings.item.CustomPaintingItems;
+import com.jay.custompaintings.library.PaintingData;
+import com.jay.custompaintings.library.PaintingEntry;
+import com.jay.custompaintings.library.PaintingLibrary;
 import com.jay.custompaintings.library.PaintingRuntime;
 import com.jay.custompaintings.library.PaintingSizes;
+import com.jay.custompaintings.library.RecipeCatalog;
 import com.mojang.blaze3d.platform.NativeImage;
 import net.fabricmc.fabric.api.client.gametest.v1.FabricClientGameTest;
 import net.fabricmc.fabric.api.client.gametest.v1.context.ClientGameTestContext;
@@ -15,11 +24,11 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.data.AtlasIds;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.decoration.painting.Painting;
 import net.minecraft.world.entity.decoration.painting.PaintingVariant;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 
 import javax.imageio.ImageIO;
@@ -31,23 +40,29 @@ import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 /**
- * Launches Minecraft and proves that an uploaded image reaches both atlases, a placed painting,
- * a relogged world, and a manual resource reload. This is the regression test for the v1.2.2
- * checkerboard bug: the old mixin compared atlas definition ids against SpriteLoader's sheet
- * texture ids, so no custom sprite was ever injected.
+ * End-to-end proof of the v2 design: an unbounded library, one component-driven item,
+ * per-id dynamic textures (no atlas injection, no resource reloads), the Survival/Creative
+ * Painting Menu, and persistent placed paintings.
+ *
+ * <p>Earlier versions asserted against the painting/item atlases. v2 deliberately bypasses
+ * atlases entirely, so those assertions are replaced by dynamic-texture and screenshot
+ * checks — which also means adding paintings can never exhaust atlas space.</p>
  */
 public final class CustomPaintingsClientGameTest implements FabricClientGameTest {
     private static final int TIMEOUT_TICKS = 2400;
 
     @Override
     public void runTest(ClientGameTestContext context) {
-        Path sourceImage = createTestImage(context);
+        configureHeadlessRenderDistance(context);
+        Path sourceImage = createTestImage(context, "custompaintings-gametest.png", 512, 512, false);
         TestWorldSave save;
         UUID persistedPaintingId;
+        int firstId;
 
         try (TestSingleplayerContext world = context.worldBuilder()
                 .adjustSettings(settings -> settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE))
@@ -60,44 +75,54 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                     && CustomPaintingsClient.library().canEdit(), TIMEOUT_TICKS);
 
             upload(context, sourceImage);
-            waitForLibrary(context, 1, 2, 2);
-            assertSprites(context, 0, 2, 2);
+            waitForCount(context, 1);
+            firstId = context.computeOnClient(client ->
+                    CustomPaintingsClient.library().library().entries().getFirst().id());
+            waitForEntry(context, firstId, 2, 2, ImageFit.FIT);
 
-            Painting placed = placePainting(world, 0, 2, 2);
+            // The item is one registry entry whose component selects the artwork.
+            assertItemIdentity(context, firstId);
+            assertPreviewUploaded(context, firstId);
+
+            Painting placed = placePainting(world, firstId, 2, 2);
             UUID placedId = placed.getUUID();
-            // Paintings use noUpdateInterval() (Integer.MAX_VALUE), so waitForClientboundEntityUpdates
-            // would wait essentially forever. Flush packets, then wait for the concrete entity instead.
+            // Paintings use noUpdateInterval(), so waitForClientboundEntityUpdates would hang.
             world.getConnection().waitForClientboundPackets();
-            context.waitFor(client -> client.level.getEntity(placedId) instanceof Painting, TIMEOUT_TICKS);
-            BlockPos paintingPos = context.computeOnClient(client -> client.level.getEntity(placedId).blockPosition());
-            context.getInput().lookAt(paintingPos);
-            context.waitTicks(20);
+            context.waitFor(client -> client.level.getEntity(placedId) instanceof Painting painting
+                    && PaintingData.entityPaintingId(painting).orElse(-1) == firstId, TIMEOUT_TICKS);
+            lookAt(context, placedId);
+            assertArtworkUploaded(context, firstId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-placed"));
 
-            resize(context, 0, 1, 1);
-            waitForLibrary(context, 1, 1, 1);
-            assertSprites(context, 0, 1, 1);
+            // The Painting Menu must hand out the same component-carrying item.
+            takeFromMenu(context, world, firstId, 3);
+
+            // Resizing is a staged edit applied through the batch path.
+            edit(context, firstId, null, 1, 1, null);
+            waitForEntry(context, firstId, 1, 1, ImageFit.FIT);
             context.waitFor(client -> client.level.getEntity(placedId) instanceof Painting painting
                     && painting.getVariant().unwrapKey()
-                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(0, 1, 1)))
+                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(1, 1)))
                     .orElse(false), TIMEOUT_TICKS);
 
-            remove(context, 0);
-            waitForLibrary(context, 0, 0, 0);
+            remove(context, firstId);
+            waitForCount(context, 0);
             context.waitFor(client -> client.level.getEntity(placedId) == null, TIMEOUT_TICKS);
-            context.waitFor(client -> CustomPaintingsClient.paintings().snapshot().loadedCount() == 0, TIMEOUT_TICKS);
+            context.waitFor(client -> CustomPaintingsClient.paintings().uploadedCount() == 0, TIMEOUT_TICKS);
 
-            // Put the artwork back so the persisted/relogged path is tested too.
+            // Restore artwork so the persisted/relogged path is exercised too.
             upload(context, sourceImage);
-            waitForLibrary(context, 1, 2, 2);
-            assertSprites(context, 0, 2, 2);
-            Painting reloggedPainting = placePainting(world, 0, 2, 2);
+            waitForCount(context, 1);
+            int relogId = context.computeOnClient(client ->
+                    CustomPaintingsClient.library().library().entries().getFirst().id());
+            if (relogId == firstId) {
+                throw new AssertionError("Removed painting ids must not be reused");
+            }
+            Painting reloggedPainting = placePainting(world, relogId, 2, 2);
             persistedPaintingId = reloggedPainting.getUUID();
             world.getConnection().waitForClientboundPackets();
             context.waitFor(client -> client.level.getEntity(persistedPaintingId) instanceof Painting, TIMEOUT_TICKS);
-            BlockPos reloggedPos = context.computeOnClient(client -> client.level.getEntity(persistedPaintingId).blockPosition());
-            context.getInput().lookAt(reloggedPos);
-            context.waitTicks(20);
+            lookAt(context, persistedPaintingId);
         }
 
         try (TestSingleplayerContext reopened = save.open()) {
@@ -105,134 +130,126 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
             context.waitFor(client -> CustomPaintingsClient.library().synced()
                     && CustomPaintingsClient.library().library().count() == 1, TIMEOUT_TICKS);
             context.waitFor(client -> client.level.getEntity(persistedPaintingId) instanceof Painting, TIMEOUT_TICKS);
-            assertSprites(context, 0, 2, 2);
+            int relogId = context.computeOnClient(client ->
+                    CustomPaintingsClient.library().library().entries().getFirst().id());
+            // Identity survives a save/load round-trip via the synced entity attachment.
+            context.waitFor(client -> client.level.getEntity(persistedPaintingId) instanceof Painting painting
+                    && PaintingData.entityPaintingId(painting).orElse(-1) == relogId, TIMEOUT_TICKS);
+            assertPreviewUploaded(context, relogId);
+            lookAt(context, persistedPaintingId);
+            assertArtworkUploaded(context, relogId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-relogged"));
 
-            long generation = CustomPaintingsClient.paintings().snapshot().generation();
-            context.runOnClient(Minecraft::reloadResourcePacks);
-            context.waitFor(client -> CustomPaintingsClient.paintings().snapshot().generation() > generation
-                    && hasSprites(client, 0, 2, 2), TIMEOUT_TICKS);
-            assertSprites(context, 0, 2, 2);
-            assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-after-resource-reload"));
+            // v2 replaces the resource reload with a cheap metadata sync + texture invalidation.
+            long generation = CustomPaintingsClient.paintings().generation();
+            context.runOnClient(client -> {
+                if (!CustomPaintingsClient.imports().reloadPaintings()) {
+                    throw new AssertionError("Reload did not start");
+                }
+            });
+            context.waitFor(client -> CustomPaintingsClient.paintings().generation() > generation
+                    && CustomPaintingsClient.paintings().preview(relogId) != null, TIMEOUT_TICKS);
+            assertArtworkUploaded(context, relogId);
+            assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-after-reload"));
 
-            // v1.3: auto-size from image proportions, preserve alpha, and exercise 8×8 + fit modes.
-            // Remove the persisted 2×2 first so the next painting does not overlap it on the test wall.
-            remove(context, 0);
-            waitForLibrary(context, 0, 0, 0);
+            // Auto-size from image proportions and preserve alpha.
+            remove(context, relogId);
+            waitForCount(context, 0);
             context.waitFor(client -> client.level.getEntity(persistedPaintingId) == null, TIMEOUT_TICKS);
-            Path wideAlpha = createWideAlphaTestImage(context);
+            Path wideAlpha = createTestImage(context, "custompaintings-gametest-wide-alpha.png", 512, 256, true);
             uploadAuto(context, wideAlpha);
-            waitForEntry(context, 0, 1, 2, 1, ImageFit.FIT);
-            assertSprites(context, 0, 2, 1);
-            assertSpriteHasTransparentCenter(context, 0, 2, 1);
-            Painting widePlaced = placePainting(reopened, 0, 2, 1);
+            waitForCount(context, 1);
+            int wideEntryId = context.computeOnClient(client ->
+                    CustomPaintingsClient.library().library().entries().getFirst().id());
+            waitForEntry(context, wideEntryId, 2, 1, ImageFit.FIT);
+            assertArtworkHasAlpha(context, wideEntryId);
+            Painting widePlaced = placePainting(reopened, wideEntryId, 2, 1);
             UUID wideId = widePlaced.getUUID();
             reopened.getConnection().waitForClientboundPackets();
             context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting, TIMEOUT_TICKS);
-            BlockPos widePos = context.computeOnClient(client -> client.level.getEntity(wideId).blockPosition());
-            context.getInput().lookAt(widePos);
-            context.waitTicks(20);
+            lookAt(context, wideId);
+            assertArtworkUploaded(context, wideEntryId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-wide-alpha"));
 
-            adjust(context, 0, "Large Mural", 8, 8, ImageFit.FILL);
-            waitForEntry(context, 0, 1, 8, 8, ImageFit.FILL);
-            assertSprites(context, 0, 8, 8);
-            context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting painting
-                    && painting.getVariant().unwrapKey()
-                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(0, 8, 8)))
-                    .orElse(false), TIMEOUT_TICKS);
+            edit(context, wideEntryId, "Large Mural", 8, 8, ImageFit.FILL);
+            waitForEntry(context, wideEntryId, 8, 8, ImageFit.FILL);
+            context.waitFor(client -> {
+                if (!(client.level.getEntity(wideId) instanceof Painting painting)) {
+                    return true;
+                }
+                return painting.getVariant().unwrapKey()
+                        .map(key -> key.identifier().equals(PaintingRuntime.variantId(8, 8)))
+                        .orElse(false);
+            }, 200);
+            context.runOnClient(client -> {
+                if (!(client.level.getEntity(wideId) instanceof Painting painting)
+                        || painting.getVariant().unwrapKey()
+                        .map(key -> !key.identifier().equals(PaintingRuntime.variantId(8, 8)))
+                        .orElse(true)) {
+                    throw new AssertionError("Resizing to 8x8 did not leave the painting alive with its new variant");
+                }
+            });
             context.waitTicks(20);
+            assertArtworkUploaded(context, wideEntryId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-8x8-fill"));
 
-            // v1.4: stage edits across several paintings, prove nothing reloads/applies yet,
-            // then apply the whole batch together and verify both slots update from one sync.
+            // Batch Apply across two paintings: one revision, no resource reload.
             upload(context, sourceImage);
-            waitForEntry(context, 1, 2, 2, 2, ImageFit.FIT);
-            assertSprites(context, 1, 2, 2);
-            context.waitTicks(40);
-            long generationBeforeDrafts = CustomPaintingsClient.paintings().snapshot().generation();
-            long reloadsBeforeDrafts = com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount();
-            long revisionBeforeDrafts = CustomPaintingsClient.library().library().revision();
+            waitForCount(context, 2);
+            int secondId = context.computeOnClient(client -> {
+                List<PaintingEntry> entries = CustomPaintingsClient.library().library().entries();
+                return entries.get(entries.size() - 1).id();
+            });
+            waitForEntry(context, secondId, 2, 2, ImageFit.FIT);
+            long revisionBefore = CustomPaintingsClient.library().library().revision();
             context.runOnClient(client -> {
-                var library = CustomPaintingsClient.library().library();
-                var drafts = CustomPaintingsClient.drafts();
-                drafts.stage(library.get(0).orElseThrow().withName("Batch Mural")
+                PaintingLibrary library = CustomPaintingsClient.library().library();
+                PaintingDrafts drafts = CustomPaintingsClient.drafts();
+                drafts.stage(library.get(wideEntryId).orElseThrow().withName("Batch Mural")
                         .withSize(8, 8).withFit(ImageFit.STRETCH), library);
-                drafts.stage(library.get(1).orElseThrow().withName("Batch Two")
+                drafts.stage(library.get(secondId).orElseThrow().withName("Batch Two")
                         .withSize(4, 2).withFit(ImageFit.FILL), library);
                 if (drafts.changeCount(library) != 2) {
                     throw new AssertionError("Expected two staged painting edits");
                 }
-                drafts.stage(library.get(1).orElseThrow().withName("Discarded"), library);
-                drafts.discardSlot(1);
-                drafts.stage(library.get(1).orElseThrow().withName("Batch Two")
+                drafts.stage(library.get(secondId).orElseThrow().withName("Discarded"), library);
+                drafts.discardPainting(secondId);
+                drafts.stage(library.get(secondId).orElseThrow().withName("Batch Two")
                         .withSize(4, 2).withFit(ImageFit.FILL), library);
             });
             context.waitTicks(20);
             context.runOnClient(client -> {
-                if (com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount() != reloadsBeforeDrafts) {
-                    throw new AssertionError("Staging drafts must not request a client texture reload");
-                }
-                var library = CustomPaintingsClient.library().library();
-                if (library.revision() != revisionBeforeDrafts) {
+                PaintingLibrary library = CustomPaintingsClient.library().library();
+                if (library.revision() != revisionBefore) {
                     throw new AssertionError("Staging drafts must not change the authoritative revision");
                 }
-                if (library.get(0).orElseThrow().fit() != ImageFit.FILL
-                        || library.get(1).orElseThrow().width() != 2) {
+                if (library.get(wideEntryId).orElseThrow().fit() != ImageFit.FILL
+                        || library.get(secondId).orElseThrow().width() != 2) {
                     throw new AssertionError("Staging drafts must not mutate the applied library");
                 }
-            });
-            context.runOnClient(client -> {
                 if (!CustomPaintingsClient.imports().applyDrafts()) {
                     throw new AssertionError("Apply batch did not start");
                 }
             });
-            waitForEntry(context, 0, 2, 8, 8, ImageFit.STRETCH);
-            waitForEntry(context, 1, 2, 4, 2, ImageFit.FILL);
-            // The authoritative sync and the post-atlas texture install are separate steps. Wait
-            // for the installed snapshot to contain the applied batch before measuring generations.
-            context.waitFor(client -> {
-                var snapshot = CustomPaintingsClient.paintings().snapshot();
-                return snapshot.generation() > generationBeforeDrafts && snapshot.error() == null
-                        && snapshot.images().stream().anyMatch(image -> image.successful()
-                        && image.entry().slot() == 0 && image.entry().width() == 8
-                        && image.entry().height() == 8 && image.entry().fit() == ImageFit.STRETCH)
-                        && snapshot.images().stream().anyMatch(image -> image.successful()
-                        && image.entry().slot() == 1 && image.entry().width() == 4
-                        && image.entry().height() == 2 && image.entry().fit() == ImageFit.FILL);
-            }, TIMEOUT_TICKS);
-            assertSprites(context, 0, 8, 8);
-            assertSprites(context, 1, 4, 2);
+            waitForEntry(context, wideEntryId, 8, 8, ImageFit.STRETCH);
+            waitForEntry(context, secondId, 4, 2, ImageFit.FILL);
             context.runOnClient(client -> {
-                // Minecraft/server data reloads can add unrelated atlas generations in singleplayer.
-                // The mod's own coalescing gate must still start exactly one reload for the batch.
-                if (com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount() != reloadsBeforeDrafts + 1) {
-                    throw new AssertionError("Apply batch should coalesce into exactly one mod-requested atlas reload");
-                }
-                if (CustomPaintingsClient.paintings().snapshot().generation() <= generationBeforeDrafts) {
-                    throw new AssertionError("Apply batch should refresh the installed client textures");
-                }
-                if (CustomPaintingsClient.library().library().revision() != revisionBeforeDrafts + 1) {
+                if (CustomPaintingsClient.library().library().revision() != revisionBefore + 1) {
                     throw new AssertionError("Apply batch should save exactly one authoritative revision");
                 }
                 if (CustomPaintingsClient.drafts().hasChanges(CustomPaintingsClient.library().library())) {
                     throw new AssertionError("Successful Apply should clear staged drafts");
                 }
             });
-            context.waitFor(client -> client.level.getEntity(wideId) instanceof Painting painting
-                    && painting.getVariant().unwrapKey()
-                    .map(key -> key.identifier().equals(PaintingRuntime.variantId(0, 8, 8)))
-                    .orElse(false), TIMEOUT_TICKS);
             context.waitTicks(20);
+            assertArtworkUploaded(context, wideEntryId);
             assertScreenshotHasArtwork(context.takeScreenshot("custom-painting-batch-apply"));
 
-            // v1.5: draft previews compose the unchanged master at the draft aspect ratio off-thread,
-            // without touching the atlas, and release their GPU texture when the editor closes.
-            long reloadsBeforePreview = com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount();
+            // Draft previews compose off-thread and never touch the shared textures.
             var preview = context.computeOnClient(client -> {
-                var entry = CustomPaintingsClient.library().library().get(1).orElseThrow();
-                byte[] png = CustomPaintingsClient.library().image(entry.slot()).orElseThrow();
-                var draftPreview = new com.jay.custompaintings.client.PaintingDraftPreview();
+                PaintingEntry entry = CustomPaintingsClient.library().library().get(secondId).orElseThrow();
+                byte[] png = CustomPaintingsClient.library().imageOrRequest(entry.id()).orElseThrow();
+                PaintingDraftPreview draftPreview = new PaintingDraftPreview();
                 draftPreview.request(entry.withSize(4, 1).withFit(ImageFit.FILL), png);
                 return draftPreview;
             });
@@ -244,42 +261,70 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                 if (preview.textureWidth() != preview.textureHeight() * 4) {
                     throw new AssertionError("Draft preview must preserve the 4x1 canvas aspect ratio");
                 }
-                if (com.jay.custompaintings.client.ClientPaintingNetwork.textureReloadCount() != reloadsBeforePreview) {
-                    throw new AssertionError("Draft previews must not request atlas reloads");
-                }
                 preview.close();
             });
 
-            // Pending removals are reversible per slot until Apply.
+            // The headline v2 feature: go past the old 10-painting cap and past the recipe pool.
+            uploadMany(context, sourceImage, 12);
+            waitForCount(context, 14);
+            assertUnboundedLibrary(context);
+            assertMenuGivesBeyondRecipes(context, reopened);
+            assertItemIconRenders(context, reopened);
+
+            // Pending removals stay reversible until Apply.
             context.runOnClient(client -> {
-                var library = CustomPaintingsClient.library().library();
-                var drafts = CustomPaintingsClient.drafts();
-                drafts.markRemoved(1, library);
-                if (!drafts.isRemoved(1) || drafts.removals(library).size() != 1) {
+                PaintingLibrary library = CustomPaintingsClient.library().library();
+                PaintingDrafts drafts = CustomPaintingsClient.drafts();
+                drafts.markRemoved(secondId, library);
+                if (!drafts.isRemoved(secondId) || drafts.removals(library).size() != 1) {
                     throw new AssertionError("Removal should be staged locally");
                 }
-                drafts.discardSlot(1);
-                if (drafts.hasChanges(library) || library.count() != 2) {
-                    throw new AssertionError("Undoing a pending removal must restore the draft list without touching the server");
+                drafts.discardPainting(secondId);
+                if (drafts.hasChanges(library) || library.count() != 14) {
+                    throw new AssertionError("Undoing a pending removal must not touch the server");
                 }
             });
         }
     }
 
-    private static Path createTestImage(ClientGameTestContext context) {
+    // ---------------------------------------------------------------- artwork
+
+    /** Set the options before opening a world; the default radius stalls chunk generation on headless CI. */
+    private static void configureHeadlessRenderDistance(ClientGameTestContext context) {
+        context.runOnClient(client -> {
+            client.options.renderDistance().set(2);
+            client.options.simulationDistance().set(5);
+            if (client.options.getEffectiveRenderDistance() > 2) {
+                throw new AssertionError("Headless render distance did not take effect: "
+                        + client.options.getEffectiveRenderDistance());
+            }
+        });
+    }
+
+    private static Path createTestImage(ClientGameTestContext context, String name,
+                                        int width, int height, boolean transparentCenter) {
         return context.computeOnClient(client -> {
-            Path file = client.gameDirectory.toPath().resolve("custompaintings-gametest.png");
-            BufferedImage image = new BufferedImage(512, 512, BufferedImage.TYPE_INT_ARGB);
+            Path file = client.gameDirectory.toPath().resolve(name);
+            BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
             Graphics2D graphics = image.createGraphics();
             try {
-                graphics.setColor(Color.RED);
-                graphics.fillRect(0, 0, 256, 256);
-                graphics.setColor(Color.GREEN);
-                graphics.fillRect(256, 0, 256, 256);
-                graphics.setColor(Color.BLUE);
-                graphics.fillRect(0, 256, 256, 256);
-                graphics.setColor(Color.YELLOW);
-                graphics.fillRect(256, 256, 256, 256);
+                if (transparentCenter) {
+                    graphics.setColor(Color.RED);
+                    graphics.fillRect(0, 0, width, height);
+                    graphics.setComposite(java.awt.AlphaComposite.Clear);
+                    graphics.fillRect(width / 4, height / 4, width / 2, height / 2);
+                } else {
+                    int halfWidth = width / 2;
+                    int halfHeight = height / 2;
+                    graphics.setColor(Color.RED);
+                    graphics.fillRect(0, 0, halfWidth, halfHeight);
+                    graphics.setColor(Color.GREEN);
+                    graphics.fillRect(halfWidth, 0, halfWidth, halfHeight);
+                    graphics.setColor(Color.BLUE);
+                    graphics.fillRect(0, halfHeight, halfWidth, halfHeight);
+                    graphics.setColor(Color.YELLOW);
+                    graphics.fillRect(halfWidth, halfHeight, halfWidth, halfHeight);
+                }
             } finally {
                 graphics.dispose();
             }
@@ -292,27 +337,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
         });
     }
 
-    private static Path createWideAlphaTestImage(ClientGameTestContext context) {
-        return context.computeOnClient(client -> {
-            Path file = client.gameDirectory.toPath().resolve("custompaintings-gametest-wide-alpha.png");
-            BufferedImage image = new BufferedImage(512, 256, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = image.createGraphics();
-            try {
-                graphics.setColor(Color.RED);
-                graphics.fillRect(0, 0, 512, 256);
-                graphics.setComposite(java.awt.AlphaComposite.Clear);
-                graphics.fillRect(128, 64, 256, 128);
-            } finally {
-                graphics.dispose();
-            }
-            try {
-                ImageIO.write(image, "png", file.toFile());
-            } catch (IOException exception) {
-                throw new UncheckedIOException("Could not write the generated wide alpha artwork", exception);
-            }
-            return file;
-        });
-    }
+    // ------------------------------------------------------------- operations
 
     private static void upload(ClientGameTestContext context, Path file) {
         context.runOnClient(client -> {
@@ -330,113 +355,246 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
         });
     }
 
-    private static void adjust(ClientGameTestContext context, int slot, String name, int width, int height, ImageFit fit) {
+    /** Uploads several copies in one batch, proving the batch path and the unlimited library. */
+    private static void uploadMany(ClientGameTestContext context, Path file, int copies) {
+        List<Path> files = context.computeOnClient(client -> {
+            List<Path> copiesOnDisk = new ArrayList<>();
+            for (int index = 0; index < copies; index++) {
+                Path copy = client.gameDirectory.toPath().resolve("custompaintings-batch-" + index + ".png");
+                try {
+                    Files.copy(file, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException exception) {
+                    throw new UncheckedIOException("Could not create a unique batch upload source", exception);
+                }
+                copiesOnDisk.add(copy);
+            }
+            return List.copyOf(copiesOnDisk);
+        });
         context.runOnClient(client -> {
-            if (!CustomPaintingsClient.imports().adjust(slot, name, PaintingSizes.of(width, height), fit)) {
-                throw new AssertionError("Adjust did not start");
+            if (!CustomPaintingsClient.imports().importImages(files, PaintingSizes.DEFAULT)) {
+                throw new AssertionError("Batch upload did not start");
             }
         });
     }
 
-    private static void resize(ClientGameTestContext context, int slot, int width, int height) {
+    private static void edit(ClientGameTestContext context, int id, String name,
+                             int width, int height, ImageFit fit) {
         context.runOnClient(client -> {
-            if (!CustomPaintingsClient.imports().resize(slot, PaintingSizes.of(width, height))) {
-                throw new AssertionError("Resize did not start");
+            PaintingLibrary library = CustomPaintingsClient.library().library();
+            PaintingEntry entry = library.get(id).orElseThrow();
+            PaintingEntry draft = entry
+                    .withName(name != null ? name : entry.name())
+                    .withSize(width, height)
+                    .withFit(fit != null ? fit : entry.fit());
+            CustomPaintingsClient.drafts().stage(draft, library);
+            if (!CustomPaintingsClient.imports().applyDrafts()) {
+                throw new AssertionError("Edit did not start");
             }
         });
     }
 
-    private static void remove(ClientGameTestContext context, int slot) {
+    private static void remove(ClientGameTestContext context, int id) {
         context.runOnClient(client -> {
-            if (!CustomPaintingsClient.imports().remove(slot)) {
+            PaintingLibrary library = CustomPaintingsClient.library().library();
+            CustomPaintingsClient.drafts().markRemoved(id, library);
+            if (!CustomPaintingsClient.imports().applyDrafts()) {
                 throw new AssertionError("Remove did not start");
             }
         });
     }
 
-    private static void waitForLibrary(ClientGameTestContext context, int count, int width, int height) {
-        context.waitFor(client -> {
-            var library = CustomPaintingsClient.library();
-            if (!library.synced() || library.library().count() != count || CustomPaintingsClient.imports().state().busy()) {
-                return false;
+    private static void takeFromMenu(ClientGameTestContext context, TestSingleplayerContext world,
+                                     int paintingId, int count) {
+        world.getServer().runOnServer(server -> world.getConnection().getServerPlayer().getInventory().clearContent());
+        context.runOnClient(client -> {
+            if (!CustomPaintingsClient.imports().givePainting(paintingId, count)) {
+                throw new AssertionError("Painting Menu request did not start");
             }
-            return count == 0 || library.library().get(0)
-                    .map(entry -> entry.width() == width && entry.height() == height)
-                    .orElse(false);
-        }, TIMEOUT_TICKS);
+        });
+        context.waitFor(client -> !CustomPaintingsClient.imports().state().busy(), TIMEOUT_TICKS);
+        world.getServer().computeOnServer(server -> {
+            ServerPlayer player = world.getConnection().getServerPlayer();
+            int found = 0;
+            for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
+                if (CustomPaintingItems.isCustomPainting(stack)
+                        && CustomPaintingItems.paintingId(stack) == paintingId) {
+                    found += stack.getCount();
+                }
+            }
+            if (found != count) {
+                throw new AssertionError("Painting Menu should give " + count + " paintings, gave " + found);
+            }
+            return null;
+        });
     }
 
-    private static void waitForEntry(ClientGameTestContext context, int slot, int count, int width, int height, ImageFit fit) {
+    // ------------------------------------------------------------ assertions
+
+    private static void waitForCount(ClientGameTestContext context, int count) {
+        context.waitFor(client -> CustomPaintingsClient.library().synced()
+                && CustomPaintingsClient.library().library().count() == count
+                && !CustomPaintingsClient.imports().state().busy(), TIMEOUT_TICKS);
+    }
+
+    private static void waitForEntry(ClientGameTestContext context, int id, int width, int height, ImageFit fit) {
         context.waitFor(client -> {
-            var library = CustomPaintingsClient.library();
-            if (!library.synced() || library.library().count() != count || CustomPaintingsClient.imports().state().busy()) {
-                return false;
-            }
-            return library.library().get(slot)
+            ClientPaintingLibrary library = CustomPaintingsClient.library();
+            return library.synced() && !CustomPaintingsClient.imports().state().busy()
+                    && library.library().get(id)
                     .map(entry -> entry.width() == width && entry.height() == height && entry.fit() == fit)
                     .orElse(false);
         }, TIMEOUT_TICKS);
+        context.waitFor(client -> CustomPaintingsClient.paintings().preview(id) != null, TIMEOUT_TICKS);
     }
 
-    private static void assertSpriteHasTransparentCenter(ClientGameTestContext context, int slot, int width, int height) {
+    private static void assertItemIdentity(ClientGameTestContext context, int paintingId) {
         context.runOnClient(client -> {
-            var paintings = client.getAtlasManager().getAtlasOrThrow(AtlasIds.PAINTINGS);
-            var sprite = paintings.getSprite(PaintingRuntime.variantAssetId(slot, width, height));
-            if (!sprite.contents().isTransparent(0, width * 128, height * 128)) {
-                throw new AssertionError("Custom painting sprite lost its transparent center");
+            ItemStack stack = CustomPaintingItems.stack(paintingId);
+            if (!CustomPaintingItems.isCustomPainting(stack)
+                    || CustomPaintingItems.paintingId(stack) != paintingId) {
+                throw new AssertionError("Custom painting item lost its painting id component");
+            }
+            if (!stack.getItem().equals(CustomPaintingItems.get())) {
+                throw new AssertionError("Every painting must share one registered item");
+            }
+            if (!stack.getHoverName().getString().equals(
+                    CustomPaintingsClient.library().library().get(paintingId).orElseThrow().name())) {
+                throw new AssertionError("Item name should come from the painting entry");
             }
         });
     }
 
-    private static void assertSprites(ClientGameTestContext context, int slot, int width, int height) {
-        // Atlas sprites can exist before Custom Paintings' post-atlas listener installs previews
-        // and publishes the new texture snapshot. Wait for that snapshot too, otherwise generation
-        // assertions race the very reload they are trying to measure.
-        context.waitFor(client -> hasSprites(client, slot, width, height)
-                && CustomPaintingsClient.paintings().snapshot().error() == null
-                && CustomPaintingsClient.paintings().snapshot().images().stream()
-                .anyMatch(image -> image.successful() && image.entry().slot() == slot
-                        && image.entry().width() == width && image.entry().height() == height), TIMEOUT_TICKS);
+    private static void assertArtworkUploaded(ClientGameTestContext context, int paintingId) {
+        context.waitFor(client -> CustomPaintingsClient.paintings().artwork(paintingId) != null, TIMEOUT_TICKS);
+    }
+
+    private static void assertPreviewUploaded(ClientGameTestContext context, int paintingId) {
+        context.waitFor(client -> CustomPaintingsClient.paintings().preview(paintingId) != null
+                && CustomPaintingsClient.paintings().artwork(paintingId) != null, TIMEOUT_TICKS);
         context.runOnClient(client -> {
-            String error = CustomPaintingsClient.paintings().snapshot().error();
-            if (error != null) {
-                throw new AssertionError("Custom painting texture verification failed: " + error);
+            PaintingEntry entry = CustomPaintingsClient.library().library().get(paintingId).orElseThrow();
+            PaintingTextureManager.Texture preview = CustomPaintingsClient.paintings().preview(paintingId);
+            if (preview == null || preview.width() <= 0 || preview.height() <= 0) {
+                throw new AssertionError("Preview texture was not uploaded for painting " + paintingId);
             }
-            var atlases = client.getAtlasManager();
-            var paintings = atlases.getAtlasOrThrow(AtlasIds.PAINTINGS);
-            var items = atlases.getAtlasOrThrow(AtlasIds.ITEMS);
-            if (paintings.getSprite(PaintingRuntime.variantAssetId(slot, width, height)) == paintings.missingSprite()) {
-                throw new AssertionError("Painting atlas is missing " + PaintingRuntime.variantAssetId(slot, width, height));
+            PaintingTextureManager.Texture artwork = CustomPaintingsClient.paintings().artwork(paintingId);
+            if (artwork == null) {
+                throw new AssertionError("Artwork texture was not uploaded for painting " + paintingId);
             }
-            if (items.getSprite(PaintingRuntime.itemTextureId(slot)) == items.missingSprite()) {
-                throw new AssertionError("Item atlas is missing " + PaintingRuntime.itemTextureId(slot));
+            if (artwork.width() * entry.height() != artwork.height() * entry.width()) {
+                throw new AssertionError("Artwork texture must match the canvas aspect ratio");
             }
         });
     }
 
-    private static boolean hasSprites(Minecraft client, int slot, int width, int height) {
-        var atlases = client.getAtlasManager();
-        var paintings = atlases.getAtlasOrThrow(AtlasIds.PAINTINGS);
-        var items = atlases.getAtlasOrThrow(AtlasIds.ITEMS);
-        return paintings.getSprite(PaintingRuntime.variantAssetId(slot, width, height)) != paintings.missingSprite()
-                && items.getSprite(PaintingRuntime.itemTextureId(slot)) != items.missingSprite();
+    /** Reads the composed master back and proves alpha survived the pipeline. */
+    private static void assertArtworkHasAlpha(ClientGameTestContext context, int paintingId) {
+        context.waitFor(client -> CustomPaintingsClient.library().image(paintingId).isPresent(), TIMEOUT_TICKS);
+        context.runOnClient(client -> {
+            byte[] png = CustomPaintingsClient.library().image(paintingId).orElseThrow();
+            try (InputStream input = new java.io.ByteArrayInputStream(png)) {
+                BufferedImage image = ImageIO.read(input);
+                if (image == null) {
+                    throw new AssertionError("Uploaded master PNG could not be decoded");
+                }
+                if (image.getColorModel().getAlpha(
+                        image.getRaster().getDataElements(image.getWidth() / 2, image.getHeight() / 2, null)) != 0) {
+                    throw new AssertionError("Uploaded artwork lost its transparent center");
+                }
+            } catch (IOException exception) {
+                throw new AssertionError("Could not read the uploaded master PNG", exception);
+            }
+        });
     }
 
-    private static Painting placePainting(TestSingleplayerContext world, int slot, int width, int height) {
+    private static void assertUnboundedLibrary(ClientGameTestContext context) {
+        context.runOnClient(client -> {
+            PaintingLibrary library = CustomPaintingsClient.library().library();
+            if (library.count() != 14) {
+                throw new AssertionError("Library should hold 14 paintings, holds " + library.count());
+            }
+            long uniqueIds = library.entries().stream().map(PaintingEntry::id).distinct().count();
+            if (uniqueIds != library.count()) {
+                throw new AssertionError("Painting ids must be unique");
+            }
+            long recipes = library.entries().stream().filter(PaintingEntry::hasRecipe)
+                    .map(PaintingEntry::recipeId).distinct().count();
+            long withRecipe = library.entries().stream().filter(PaintingEntry::hasRecipe).count();
+            if (recipes != withRecipe) {
+                throw new AssertionError("Crafting recipes must not be shared between paintings");
+            }
+            if (withRecipe > RecipeCatalog.size()) {
+                throw new AssertionError("More recipes assigned than the catalogue contains");
+            }
+            for (PaintingEntry entry : library.entries()) {
+                if (!PaintingSizes.isSupported(entry.width(), entry.height())) {
+                    throw new AssertionError("Unsupported canvas size in library");
+                }
+            }
+        });
+        // Every painting must be reachable through the paged sync, not just the first page.
+        context.waitFor(client -> CustomPaintingsClient.library().library().entries().stream()
+                .allMatch(entry -> CustomPaintingsClient.library().entry(entry.id()).isPresent()), TIMEOUT_TICKS);
+    }
+
+    /** Paintings with no crafting recipe must still be obtainable from the menu. */
+    private static void assertMenuGivesBeyondRecipes(ClientGameTestContext context,
+                                                     TestSingleplayerContext world) {
+        int menuOnlyId = context.computeOnClient(client -> {
+            // Force the situation the unlimited library creates: more paintings than recipes.
+            PaintingLibrary library = CustomPaintingsClient.library().library();
+            return library.entries().stream().filter(entry -> !entry.hasRecipe())
+                    .map(PaintingEntry::id).findFirst()
+                    .orElse(library.entries().getLast().id());
+        });
+        takeFromMenu(context, world, menuOnlyId, 16);
+    }
+
+    /** Opens the menu and screenshots it, proving icons render for many paintings at once. */
+    private static void assertItemIconRenders(ClientGameTestContext context, TestSingleplayerContext world) {
+        List<Integer> ids = context.computeOnClient(client ->
+                CustomPaintingsClient.library().library().entries().stream().map(PaintingEntry::id).toList());
+        context.waitFor(client -> ids.stream().allMatch(id ->
+                CustomPaintingsClient.paintings().preview(id) != null), TIMEOUT_TICKS);
+        context.runOnClient(client -> CustomPaintingsClient.openMenu(null));
+        context.waitTicks(20);
+        context.runOnClient(client -> {
+            if (!(client.gui.screen() instanceof com.jay.custompaintings.client.PaintingMenuScreen)) {
+                throw new AssertionError("Painting Menu did not open");
+            }
+        });
+        context.takeScreenshot("custom-painting-menu");
+        context.runOnClient(client -> client.gui.setScreen(null));
+        context.waitTicks(5);
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private static void lookAt(ClientGameTestContext context, UUID entityId) {
+        BlockPos pos = context.computeOnClient(client -> client.level.getEntity(entityId).blockPosition());
+        context.getInput().lookAt(pos);
+        context.waitTicks(20);
+    }
+
+    private static Painting placePainting(TestSingleplayerContext world, int paintingId, int width, int height) {
         return world.getServer().computeOnServer(server -> {
             ServerPlayer player = world.getConnection().getServerPlayer();
             ServerLevel level = player.level();
-            BlockPos wall = player.blockPosition().offset(-10, 0, -12);
+            BlockPos wall = player.blockPosition().offset(-10, 8, -6);
             for (int x = 0; x < 20; x++) {
-                for (int y = 0; y < 20; y++) {
+                // Leave room below the anchor for the maximum 8-block-tall canvas.
+                for (int y = -1; y < 20; y++) {
                     level.setBlock(wall.offset(x, y, 0), Blocks.STONE.defaultBlockState(), 3);
                 }
             }
             Holder<PaintingVariant> variant = level.registryAccess()
                     .lookupOrThrow(Registries.PAINTING_VARIANT)
-                    .get(PaintingRuntime.variantKey(slot, width, height))
-                    .orElseThrow(() -> new AssertionError("Custom painting variant is not registered"));
-            Painting painting = new Painting(level, wall.offset(10, 10, 1), Direction.SOUTH, variant);
+                    .get(PaintingRuntime.variantKey(width, height))
+                    .orElseThrow(() -> new AssertionError("Canvas variant is not registered: " + width + "x" + height));
+            // Keep the canvas a few blocks ahead and near eye height so the render assertion
+            // does not depend on the initial camera pitch or distant spawn-chunk visibility.
+            Painting painting = new Painting(level, wall.offset(10, 3, 1), Direction.SOUTH, variant);
+            PaintingData.setEntityPaintingId(painting, paintingId);
             if (!painting.survives()) {
                 throw new AssertionError("Test painting could not be placed on the generated wall");
             }
@@ -467,6 +625,28 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                 }
             }
             if (artworkPixels < 100) {
+                System.out.println("Screenshot dimensions: " + image.getWidth() + "x" + image.getHeight());
+                System.out.println("Screenshot sample follows (R/G/B = artwork, # = bright neutral, . = dark):");
+                int sampleWidth = 64;
+                int sampleHeight = 32;
+                for (int sy = 0; sy < sampleHeight; sy++) {
+                    StringBuilder row = new StringBuilder(sampleWidth);
+                    for (int sx = 0; sx < sampleWidth; sx++) {
+                        int pixel = image.getPixel(sx * image.getWidth() / sampleWidth,
+                                sy * image.getHeight() / sampleHeight);
+                        int red = pixel >> 16 & 255;
+                        int green = pixel >> 8 & 255;
+                        int blue = pixel & 255;
+                        char sample = red > 90 && red > green * 1.5 && red > blue * 1.5 ? 'R'
+                                : green > 90 && green > red * 1.5 && green > blue * 1.5 ? 'G'
+                                : blue > 90 && blue > red * 1.5 && blue > green * 1.5 ? 'B'
+                                : red > 180 && green > 180 && blue < 100 ? 'Y'
+                                : red > 200 && blue > 200 && green < 100 ? 'M'
+                                : Math.max(red, Math.max(green, blue)) > 160 ? '#' : '.';
+                        row.append(sample);
+                    }
+                    System.out.println(row);
+                }
                 throw new AssertionError("Screenshot did not contain enough uploaded artwork pixels: " + artworkPixels);
             }
         } catch (IOException exception) {

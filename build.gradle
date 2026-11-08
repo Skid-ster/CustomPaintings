@@ -74,11 +74,12 @@ dependencies {
 }
 
 tasks.named('runClientGameTest') {
+    // Force the software OpenGL backend in CI; the workflow provides an Xvfb screen with GLX enabled.
+    args '--graphicsBackend', 'OPENGL'
     doFirst {
-        // Minecraft 26.3 can default to Vulkan; force the software OpenGL path used by CI.
         def runDir = file('build/run/clientGameTest')
         runDir.mkdirs()
-        new File(runDir, 'options.txt').text = 'version:4896\npreferredGraphicsBackend:"opengl"\n'
+        new File(runDir, 'options.txt').text = 'version:4896\npreferredGraphicsBackend:"opengl"\nrenderDistance:2\nsimulationDistance:5\n'
     }
 }
 

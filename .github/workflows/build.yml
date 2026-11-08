@@ -15,6 +15,11 @@ on:
         required: true
         default: false
         type: boolean
+      review_screenshots:
+        description: 'Emit compact screenshot previews to the workflow log for visual review'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -59,6 +64,15 @@ jobs:
         with:
           gradle-version: '9.6.0'
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+      - name: Check Java syntax and resource JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet tree-sitter tree-sitter-java
+          python3 tools/check_java_syntax.py src
+          python3 tools/check_own_api.py
+          python3 tools/check_resources.py
 
       - name: Build and test
         shell: bash
@@ -135,7 +149,17 @@ jobs:
 
       - name: Run Minecraft client gametest
         shell: bash
-        run: gradle runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -noreset -ac >/tmp/xvfb.log 2>&1 &
+          xvfb_pid=$!
+          trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
+          export DISPLAY=:99
+          for _ in $(seq 1 50); do
+            [ -S /tmp/.X11-unix/X99 ] && break
+            sleep 0.1
+          done
+          gradle runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
 
       - name: Publish client gametest diagnostics
         if: failure()
@@ -240,7 +264,7 @@ jobs:
             echo '```'
             echo
             echo 'CI compilation, unit tests, and the in-game client rendering regression test passed.'
-            echo 'The client test uploads artwork, checks painting/item atlases, places a painting, relogs, and reloads resources.'
+            echo 'The client test uploads artwork, verifies per-painting textures, exercises the Painting Menu, places a painting, and relogs.'
           } > release-notes.md
 
           echo 'skip=false' >> "$GITHUB_OUTPUT"
