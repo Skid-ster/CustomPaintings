@@ -15,6 +15,11 @@ on:
         required: true
         default: false
         type: boolean
+      review_screenshots:
+        description: 'Emit compact screenshot previews to the workflow log for visual review'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -155,6 +160,43 @@ jobs:
             sleep 0.1
           done
           gradle runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
+
+      - name: Emit compact screenshot previews for visual review
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.review_screenshots
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/MakeScreenshotPreview.java" <<'EOF'
+          import java.awt.Graphics2D;
+          import java.awt.image.BufferedImage;
+          import java.io.File;
+          import javax.imageio.ImageIO;
+          public class MakeScreenshotPreview {
+              public static void main(String[] args) throws Exception {
+                  BufferedImage source = ImageIO.read(new File(args[0]));
+                  BufferedImage preview = new BufferedImage(320, 180, BufferedImage.TYPE_INT_RGB);
+                  Graphics2D graphics = preview.createGraphics();
+                  try {
+                      graphics.drawImage(source, 0, 0, preview.getWidth(), preview.getHeight(), null);
+                  } finally {
+                      graphics.dispose();
+                  }
+                  ImageIO.write(preview, "jpg", System.out);
+              }
+          }
+          EOF
+          javac "$RUNNER_TEMP/MakeScreenshotPreview.java"
+          shopt -s nullglob
+          screenshots=(build/run/clientGameTest/screenshots/*.png)
+          if ((${#screenshots[@]} == 0)); then
+            echo 'No client gametest screenshots were produced.'
+            exit 0
+          fi
+          for screenshot in "${screenshots[@]}"; do
+            printf 'SCREENSHOT_BEGIN %s\n' "$(basename "$screenshot")"
+            java -Djava.awt.headless=true -cp "$RUNNER_TEMP" MakeScreenshotPreview "$screenshot" | base64 -w0
+            printf '\nSCREENSHOT_END\n'
+          done
 
       - name: Publish client gametest diagnostics
         if: failure()
