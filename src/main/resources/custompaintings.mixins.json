@@ -5,9 +5,10 @@
   "compatibilityLevel": "JAVA_25",
   "environment": "client",
   "client": [
-    "SpriteLoaderMixin",
     "CreativeModeTabsMixin",
-    "PaintingRendererMixin"
+    "PaintingRendererMixin",
+    "PaintingRenderStateMixin",
+    "ModelManagerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

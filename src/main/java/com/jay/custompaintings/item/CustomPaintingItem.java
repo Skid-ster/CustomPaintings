@@ -1,17 +1,17 @@
 package com.jay.custompaintings.item;
 
+import com.jay.custompaintings.library.PaintingData;
 import com.jay.custompaintings.library.PaintingEntry;
 import com.jay.custompaintings.library.PaintingLibrary;
+import com.jay.custompaintings.library.PaintingLibraryAccess;
 import com.jay.custompaintings.library.PaintingRuntime;
-import com.jay.custompaintings.server.PaintingServerState;
+import com.jay.custompaintings.library.RecipeCatalog;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.decoration.painting.Painting;
-import net.minecraft.world.entity.decoration.painting.PaintingVariant;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -24,22 +24,28 @@ import net.minecraft.world.level.gameevent.GameEvent;
 import java.util.Optional;
 import java.util.function.Consumer;
 
-/** A distinct survival-friendly item that always places its own registered painting variant. */
+/**
+ * The single custom-painting item. The stack's {@link PaintingData#PAINTING_ID} component
+ * selects which of the unlimited library paintings it represents, so no per-painting
+ * registration is ever needed.
+ */
 public final class CustomPaintingItem extends Item {
-    private final int slot;
-
-    public CustomPaintingItem(int slot, Properties properties) {
+    public CustomPaintingItem(Properties properties) {
         super(properties);
-        this.slot = slot;
     }
 
-    public int slot() {
-        return slot;
+    public static Optional<PaintingEntry> entryOf(ItemStack stack) {
+        Integer id = stack.get(PaintingData.PAINTING_ID);
+        if (id == null) {
+            return Optional.empty();
+        }
+        return PaintingLibraryAccess.current().get(id);
     }
 
     @Override
     public Component getName(ItemStack stack) {
-        return CustomPaintingItems.name(slot);
+        return entryOf(stack).<Component>map(entry -> Component.literal(entry.name()))
+                .orElseGet(() -> Component.translatable("item.custompaintings.painting"));
     }
 
     @Override
@@ -49,25 +55,25 @@ public final class CustomPaintingItem extends Item {
         if (face.getAxis().isVertical()) {
             return InteractionResult.FAIL;
         }
-        PaintingLibrary library = level.isClientSide()
-                ? com.jay.custompaintings.library.PaintingLibraryAccess.current() : PaintingServerState.library();
-        Optional<PaintingEntry> entry = library.get(slot);
-        if (entry.isEmpty()) {
+        ItemStack stack = context.getItemInHand();
+        Optional<PaintingEntry> found = entryOf(stack);
+        if (found.isEmpty()) {
             return InteractionResult.FAIL;
         }
+        PaintingEntry entry = found.get();
         BlockPos pos = context.getClickedPos().relative(face);
         Player player = context.getPlayer();
-        ItemStack stack = context.getItemInHand();
         if (player != null && !player.mayUseItemAt(pos, face, stack)) {
             return InteractionResult.FAIL;
         }
         var holder = level.registryAccess().lookupOrThrow(Registries.PAINTING_VARIANT)
-                .get(PaintingRuntime.variantKey(slot, entry.get().width(), entry.get().height())).orElse(null);
+                .get(PaintingRuntime.variantKey(entry.width(), entry.height())).orElse(null);
         if (holder == null) {
             return InteractionResult.CONSUME;
         }
         Painting painting = new Painting(level, pos, face, holder);
-        painting.setCustomName(Component.literal(entry.get().name()));
+        PaintingData.setEntityPaintingId(painting, entry.id());
+        painting.setCustomName(Component.literal(entry.name()));
         if (!painting.survives()) {
             return InteractionResult.CONSUME;
         }
@@ -83,12 +89,26 @@ public final class CustomPaintingItem extends Item {
     @Override
     public void appendHoverText(ItemStack stack, TooltipContext context, TooltipDisplay display,
                                 Consumer<Component> lines, TooltipFlag flag) {
-        com.jay.custompaintings.library.PaintingLibraryAccess.current().get(slot).ifPresent(entry -> {
-            lines.accept(Component.translatable("tooltip.custompaintings.size", entry.sizeLabel()));
-            lines.accept(Component.translatable("tooltip.custompaintings.fit",
-                    Component.translatable(entry.fit().translationKey())));
+        Optional<PaintingEntry> found = entryOf(stack);
+        if (found.isEmpty()) {
+            lines.accept(Component.translatable("tooltip.custompaintings.unknown"));
+            return;
+        }
+        PaintingEntry entry = found.get();
+        lines.accept(Component.translatable("tooltip.custompaintings.size", entry.sizeLabel()));
+        lines.accept(Component.translatable("tooltip.custompaintings.fit",
+                Component.translatable(entry.fit().translationKey())));
+        if (entry.hasRecipe()) {
             lines.accept(Component.translatable("tooltip.custompaintings.recipe",
-                    com.jay.custompaintings.library.RecipeCatalog.get(entry.recipeId()).label()));
-        });
+                    RecipeCatalog.get(entry.recipeId()).label()));
+        } else {
+            lines.accept(Component.translatable("tooltip.custompaintings.menuOnly"));
+        }
+    }
+
+    /** Convenience for callers that already hold a library snapshot. */
+    public static Optional<PaintingEntry> entryOf(ItemStack stack, PaintingLibrary library) {
+        Integer id = stack.get(PaintingData.PAINTING_ID);
+        return id == null ? Optional.empty() : library.get(id);
     }
 }

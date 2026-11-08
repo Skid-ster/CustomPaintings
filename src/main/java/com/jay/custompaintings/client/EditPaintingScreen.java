@@ -102,7 +102,7 @@ public final class EditPaintingScreen extends Screen {
         addRenderableWidget(autoButton);
 
         revertButton = Button.builder(Component.translatable("config.custompaintings.edit.revert"), button -> {
-            CustomPaintingsClient.drafts().discardSlot(original.slot());
+            CustomPaintingsClient.drafts().discardPainting(original.id());
             returnToParent();
         }).bounds(left, 196, previewSize, 20).build();
         revertButton.setTooltip(Tooltip.create(Component.translatable("config.custompaintings.edit.revert.tooltip")));
@@ -136,13 +136,13 @@ public final class EditPaintingScreen extends Screen {
 
     private void requestPreviewNow() {
         if (preview != null) {
-            CustomPaintingsClient.library().image(original.slot())
+            CustomPaintingsClient.library().imageOrRequest(original.id())
                     .ifPresent(png -> preview.request(currentDraft(), png));
         }
     }
 
     private void autoSize() {
-        byte[] png = CustomPaintingsClient.library().image(original.slot()).orElse(null);
+        byte[] png = CustomPaintingsClient.library().imageOrRequest(original.id()).orElse(null);
         if (png == null) {
             error = Component.translatable("config.custompaintings.waitingSync").getString();
             return;
@@ -161,7 +161,7 @@ public final class EditPaintingScreen extends Screen {
     }
 
     private PaintingEntry currentDraft() {
-        return new PaintingEntry(original.slot(), name, canvasWidth, canvasHeight, fit,
+        return new PaintingEntry(original.id(), name, canvasWidth, canvasHeight, fit,
                 original.imageFile(), original.sha256(), original.recipeId());
     }
 
@@ -190,7 +190,7 @@ public final class EditPaintingScreen extends Screen {
             saveButton.setTooltip(Tooltip.create(Component.literal(exception.getMessage())));
         }
         if (revertButton != null) {
-            revertButton.active = CustomPaintingsClient.drafts().hasSlotChanges(original.slot(),
+            revertButton.active = CustomPaintingsClient.drafts().hasPaintingChanges(original.id(),
                     CustomPaintingsClient.library().library()) || hasUnsavedChanges();
         }
     }
@@ -249,8 +249,10 @@ public final class EditPaintingScreen extends Screen {
         int previewSize = Math.min(112, Math.max(72, contentWidth / 2 - 16));
         int controlsX = left + previewSize + 16;
         graphics.centeredText(this.font, this.title, this.width / 2, 14, 0xFFFFFFFF);
-        graphics.text(this.font, Component.translatable("config.custompaintings.recipe",
-                RecipeCatalog.get(original.recipeId()).label()), left, 36, 0xFFB8B8C8);
+        Component source = original.hasRecipe()
+                ? Component.translatable("config.custompaintings.recipe", RecipeCatalog.get(original.recipeId()).label())
+                : Component.translatable("tooltip.custompaintings.menuOnly");
+        graphics.text(this.font, this.font.plainSubstrByWidth(source.getString(), contentWidth), left, 36, 0xFFB8B8C8);
         if (preview != null) {
             preview.draw(graphics, left, 58, previewSize, previewSize);
         }
