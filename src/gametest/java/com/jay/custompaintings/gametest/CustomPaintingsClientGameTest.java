@@ -559,9 +559,10 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
         return world.getServer().computeOnServer(server -> {
             ServerPlayer player = world.getConnection().getServerPlayer();
             ServerLevel level = player.level();
-            BlockPos wall = player.blockPosition().offset(-10, -2, -6);
+            BlockPos wall = player.blockPosition().offset(-10, -1, -6);
             for (int x = 0; x < 20; x++) {
-                for (int y = 0; y < 20; y++) {
+                // Leave room below the anchor for the maximum 8-block-tall canvas.
+                for (int y = -1; y < 20; y++) {
                     level.setBlock(wall.offset(x, y, 0), Blocks.STONE.defaultBlockState(), 3);
                 }
             }
