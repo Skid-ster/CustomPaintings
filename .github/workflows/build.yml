@@ -144,7 +144,17 @@ jobs:
 
       - name: Run Minecraft client gametest
         shell: bash
-        run: gradle runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
+        run: |
+          set -euo pipefail
+          Xvfb :99 -screen 0 1280x720x24 +extension GLX +render -noreset -ac >/tmp/xvfb.log 2>&1 &
+          xvfb_pid=$!
+          trap 'kill "$xvfb_pid" 2>/dev/null || true' EXIT
+          export DISPLAY=:99
+          for _ in $(seq 1 50); do
+            [ -S /tmp/.X11-unix/X99 ] && break
+            sleep 0.1
+          done
+          gradle runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
 
       - name: Publish client gametest diagnostics
         if: failure()
