@@ -212,6 +212,7 @@ public final class PaintingImportService {
                 return false;
             }
             session = sessions.get();
+            state.set(new State(Phase.GIVING, 0, 1, "", null, null));
         }
         CompletableFuture.supplyAsync(() -> request(new PaintingPayloads.GiveRequest(
                 requestIds.incrementAndGet(), paintingId, count)), Util.ioPool())
