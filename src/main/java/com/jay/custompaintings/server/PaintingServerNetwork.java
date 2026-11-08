@@ -149,7 +149,12 @@ public final class PaintingServerNetwork {
             if (message.startsWith("ERROR:")) {
                 return CompletableFuture.completedFuture(message);
             }
-            afterSuccess.run();
+            try {
+                afterSuccess.run();
+            } catch (RuntimeException exception) {
+                CustomPaintingsMod.LOGGER.error("Painting saved but updating placed entities failed", exception);
+                return CompletableFuture.completedFuture("ERROR:Painting saved, but updating placed paintings failed; rejoin the world");
+            }
             if (!reloadData) {
                 // Metadata-only batches do not change recipe/variant occupancy. The 640 variants
                 // are pre-registered and recipes read the live library, so one sync is enough.
@@ -161,10 +166,18 @@ public final class PaintingServerNetwork {
                         CustomPaintingsMod.LOGGER.error("Painting data reload failed", exception);
                         return "ERROR:Painting saved, but the data reload failed; rejoin the world";
                     });
-        }, server).thenAcceptAsync(message -> {
+        }, server).whenCompleteAsync((message, failure) -> {
             mutationBusy = false;
+            if (failure != null) {
+                CustomPaintingsMod.LOGGER.error("Painting mutation pipeline failed", failure);
+                message = "ERROR:Painting operation failed; check the server log";
+            }
             boolean success = !message.startsWith("ERROR:");
-            broadcastSync(server);
+            try {
+                broadcastSync(server);
+            } catch (RuntimeException exception) {
+                CustomPaintingsMod.LOGGER.error("Could not broadcast painting sync", exception);
+            }
             ServerPlayNetworking.send(player, new PaintingPayloads.Result(requestId, success,
                     success ? message : message.substring("ERROR:".length())));
         }, server);

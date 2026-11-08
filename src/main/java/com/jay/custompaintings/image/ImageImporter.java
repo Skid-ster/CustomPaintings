@@ -21,7 +21,8 @@ import java.util.Set;
  * Work is sequential and bounded; callers run this off the client thread.
  */
 public final class ImageImporter {
-    public static final int MAX_BATCH_FILES = 64;
+    /** Matches the ten-slot painting library and the v3 upload payload limit. */
+    public static final int MAX_BATCH_FILES = 10;
     private static final int MAX_STEM_CODE_POINTS = 96;
     private static final String STAGING_DIRECTORY = ".imports";
     private final Path directory;
