@@ -161,55 +161,6 @@ jobs:
           done
           gradle runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
 
-      - name: Emit compact screenshot previews for visual review
-        if: always() && github.event_name == 'push' && contains(github.event.head_commit.message, '[visual-review]')
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > "$RUNNER_TEMP/MakeScreenshotPreview.java" <<'EOF'
-          import java.awt.Graphics2D;
-          import java.awt.image.BufferedImage;
-          import java.io.File;
-          import javax.imageio.IIOImage;
-          import javax.imageio.ImageIO;
-          import javax.imageio.ImageWriteParam;
-          import javax.imageio.stream.ImageOutputStream;
-          public class MakeScreenshotPreview {
-              public static void main(String[] args) throws Exception {
-                  BufferedImage source = ImageIO.read(new File(args[0]));
-                  BufferedImage preview = new BufferedImage(128, 72, BufferedImage.TYPE_INT_RGB);
-                  Graphics2D graphics = preview.createGraphics();
-                  try {
-                      graphics.drawImage(source, 0, 0, preview.getWidth(), preview.getHeight(), null);
-                  } finally {
-                      graphics.dispose();
-                  }
-                  var writer = ImageIO.getImageWritersByFormatName("jpg").next();
-                  ImageWriteParam params = writer.getDefaultWriteParam();
-                  params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-                  params.setCompressionQuality(0.2f);
-                  try (ImageOutputStream output = ImageIO.createImageOutputStream(System.out)) {
-                      writer.setOutput(output);
-                      writer.write(null, new IIOImage(preview, null, null), params);
-                  } finally {
-                      writer.dispose();
-                  }
-              }
-          }
-          EOF
-          javac "$RUNNER_TEMP/MakeScreenshotPreview.java"
-          shopt -s nullglob
-          screenshots=(build/run/clientGameTest/screenshots/*.png)
-          if ((${#screenshots[@]} == 0)); then
-            echo 'No client gametest screenshots were produced.'
-            exit 0
-          fi
-          for screenshot in "${screenshots[@]}"; do
-            printf 'SCREENSHOT_BEGIN %s\n' "$(basename "$screenshot")"
-            java -Djava.awt.headless=true -cp "$RUNNER_TEMP" MakeScreenshotPreview "$screenshot" | base64 -w0
-            printf '\nSCREENSHOT_END\n'
-          done
-
       - name: Publish client gametest diagnostics
         if: failure()
         shell: bash
