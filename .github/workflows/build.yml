@@ -170,18 +170,30 @@ jobs:
           import java.awt.Graphics2D;
           import java.awt.image.BufferedImage;
           import java.io.File;
+          import javax.imageio.IIOImage;
           import javax.imageio.ImageIO;
+          import javax.imageio.ImageWriteParam;
+          import javax.imageio.stream.ImageOutputStream;
           public class MakeScreenshotPreview {
               public static void main(String[] args) throws Exception {
                   BufferedImage source = ImageIO.read(new File(args[0]));
-                  BufferedImage preview = new BufferedImage(320, 180, BufferedImage.TYPE_INT_RGB);
+                  BufferedImage preview = new BufferedImage(160, 90, BufferedImage.TYPE_INT_RGB);
                   Graphics2D graphics = preview.createGraphics();
                   try {
                       graphics.drawImage(source, 0, 0, preview.getWidth(), preview.getHeight(), null);
                   } finally {
                       graphics.dispose();
                   }
-                  ImageIO.write(preview, "jpg", System.out);
+                  var writer = ImageIO.getImageWritersByFormatName("jpg").next();
+                  ImageWriteParam params = writer.getDefaultWriteParam();
+                  params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
+                  params.setCompressionQuality(0.3f);
+                  try (ImageOutputStream output = ImageIO.createImageOutputStream(System.out)) {
+                      writer.setOutput(output);
+                      writer.write(null, new IIOImage(preview, null, null), params);
+                  } finally {
+                      writer.dispose();
+                  }
               }
           }
           EOF
