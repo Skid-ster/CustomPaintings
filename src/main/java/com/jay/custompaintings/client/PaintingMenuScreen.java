@@ -154,7 +154,7 @@ public final class PaintingMenuScreen extends Screen {
     @Override
     public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
         // Enter takes the highlighted painting, matching inventory muscle memory.
-        if (event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_KP_ENTER || event.key() == org.lwjgl.glfw.GLFW.GLFW_KEY_ENTER) {
+        if (event.isConfirmation()) {
             if (selected() != null) {
                 take(1);
                 return true;

@@ -54,7 +54,7 @@ public final class CustomPaintingsClient implements ClientModInitializer {
         ClientPaintingNetwork.register(library, imports, drafts);
 
         openMenuKey = KeyMappingHelper.registerKeyMapping(new KeyMapping(
-                "key.custompaintings.menu", InputConstants.Type.KEYSYM, InputConstants.KEY_P,
+                "key.custompaintings.menu", InputConstants.Type.KEYBOARD, InputConstants.KEY_P,
                 KeyMapping.Category.MISC));
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (openMenuKey.consumeClick()) {

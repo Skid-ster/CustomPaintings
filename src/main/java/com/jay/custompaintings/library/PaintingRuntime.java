@@ -43,7 +43,7 @@ public final class PaintingRuntime {
     }
 
     public static Optional<PaintingVariant> variant(Registry<PaintingVariant> registry, int width, int height) {
-        return registry.getOptional(variantKey(width, height)).map(holder -> holder.value());
+        return registry.getOptional(variantKey(width, height));
     }
 
     /** True for our size-only canvas variants (and legacy v1.x slot variants during migration). */

@@ -28,6 +28,8 @@ public final class PaintingPayloads {
     public static final int ENTRIES_PER_PAGE = 128;
     public static final int MAX_BATCH_IMAGES = 64;
     public static final int MAX_BATCH_CHANGES = 256;
+    public static final int MAX_SYNC_PAGE_BYTES = ENTRIES_PER_PAGE * 512;
+    public static final int MAX_APPLY_BATCH_BYTES = MAX_BATCH_CHANGES * 512;
 
     private PaintingPayloads() {
     }
@@ -238,17 +240,17 @@ public final class PaintingPayloads {
     }
 
     public static void register() {
-        PayloadTypeRegistry.playS2C().register(SyncPage.TYPE, SyncPage.STREAM_CODEC);
-        PayloadTypeRegistry.playS2C().register(ImageStart.TYPE, ImageStart.STREAM_CODEC);
-        PayloadTypeRegistry.playS2C().register(ImageChunk.TYPE, ImageChunk.STREAM_CODEC);
-        PayloadTypeRegistry.playS2C().register(Result.TYPE, Result.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(SyncRequest.TYPE, SyncRequest.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(ImageRequest.TYPE, ImageRequest.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(ImageChunk.TYPE, ImageChunk.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(UploadStart.TYPE, UploadStart.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(UploadCommit.TYPE, UploadCommit.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(ApplyBatch.TYPE, ApplyBatch.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(GiveRequest.TYPE, GiveRequest.STREAM_CODEC);
+        PayloadTypeRegistry.clientboundPlay().registerLarge(SyncPage.TYPE, SyncPage.STREAM_CODEC, MAX_SYNC_PAGE_BYTES);
+        PayloadTypeRegistry.clientboundPlay().register(ImageStart.TYPE, ImageStart.STREAM_CODEC);
+        PayloadTypeRegistry.clientboundPlay().registerLarge(ImageChunk.TYPE, ImageChunk.STREAM_CODEC, CHUNK_BYTES + 1024);
+        PayloadTypeRegistry.clientboundPlay().register(Result.TYPE, Result.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(SyncRequest.TYPE, SyncRequest.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(ImageRequest.TYPE, ImageRequest.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().registerLarge(ImageChunk.TYPE, ImageChunk.STREAM_CODEC, CHUNK_BYTES + 1024);
+        PayloadTypeRegistry.serverboundPlay().register(UploadStart.TYPE, UploadStart.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(UploadCommit.TYPE, UploadCommit.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().registerLarge(ApplyBatch.TYPE, ApplyBatch.STREAM_CODEC, MAX_APPLY_BATCH_BYTES);
+        PayloadTypeRegistry.serverboundPlay().register(GiveRequest.TYPE, GiveRequest.STREAM_CODEC);
     }
 
     /** Reassembles a chunked master PNG, tolerating any chunk arrival order. */

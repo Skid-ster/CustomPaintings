@@ -94,7 +94,7 @@ public final class PaintingServerNetwork {
                     for (int id : payload.removals()) {
                         removePlacedPaintings(context.server(), id);
                     }
-                }, !payload.removals().isEmpty()));
+                }));
         ServerPlayNetworking.registerGlobalReceiver(PaintingPayloads.GiveRequest.TYPE, (payload, context) ->
                 giveFromMenu(context.player(), payload));
 
@@ -267,11 +267,11 @@ public final class PaintingServerNetwork {
     }
 
     private static void mutate(MinecraftServer server, ServerPlayer player, long requestId, Mutation mutation) {
-        mutate(server, player, requestId, mutation, () -> { }, true);
+        mutate(server, player, requestId, mutation, () -> { });
     }
 
     private static void mutate(MinecraftServer server, ServerPlayer player, long requestId,
-                               Mutation mutation, Runnable afterSuccess, boolean reloadData) {
+                               Mutation mutation, Runnable afterSuccess) {
         if (!canEdit(player)) {
             ServerPlayNetworking.send(player, new PaintingPayloads.Result(requestId, false,
                     "Only the singleplayer owner or a server operator can edit paintings"));
@@ -301,17 +301,8 @@ public final class PaintingServerNetwork {
                 return CompletableFuture.completedFuture(
                         "ERROR:Painting saved, but updating placed paintings failed; rejoin the world");
             }
-            if (!reloadData) {
-                // Metadata-only batches keep recipe occupancy, and recipes read the live library.
-                return CompletableFuture.completedFuture(result);
-            }
-            // Recipe occupancy changed: refresh the recipe book so new/removed crafts appear.
-            return server.reloadResources(server.getPackRepository().getSelectedIds())
-                    .thenApply(ignored -> result)
-                    .exceptionally(exception -> {
-                        CustomPaintingsMod.LOGGER.error("Painting data reload failed", exception);
-                        return "ERROR:Painting saved, but the data reload failed; rejoin the world";
-                    });
+            // Recipe ownership is resolved from the live library; metadata edits need no resource reload.
+            return CompletableFuture.completedFuture(result);
         }, server).whenCompleteAsync((result, failure) -> {
             mutationBusy = false;
             String message = result;

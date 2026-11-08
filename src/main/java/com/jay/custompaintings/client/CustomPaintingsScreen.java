@@ -242,7 +242,7 @@ public final class CustomPaintingsScreen extends Screen {
     private void openFolder() {
         try {
             java.nio.file.Files.createDirectories(CustomPaintingsMod.imagesDirectory());
-            net.minecraft.util.Util.getPlatform().openUri(CustomPaintingsMod.imagesDirectory().toUri());
+            com.mojang.blaze3d.Blaze3D.openPath(CustomPaintingsMod.imagesDirectory());
             setNotice(Component.translatable("config.custompaintings.folderOpened"), MUTED);
         } catch (Exception exception) {
             setNotice(Component.translatable("config.custompaintings.folderError", exception.getMessage()), ERROR);
