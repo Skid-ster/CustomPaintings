@@ -357,10 +357,19 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
 
     /** Uploads several copies in one batch, proving the batch path and the unlimited library. */
     private static void uploadMany(ClientGameTestContext context, Path file, int copies) {
-        List<Path> files = new ArrayList<>();
-        for (int index = 0; index < copies; index++) {
-            files.add(file);
-        }
+        List<Path> files = context.computeOnClient(client -> {
+            List<Path> copiesOnDisk = new ArrayList<>();
+            for (int index = 0; index < copies; index++) {
+                Path copy = client.gameDirectory.toPath().resolve("custompaintings-batch-" + index + ".png");
+                try {
+                    Files.copy(file, copy, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException exception) {
+                    throw new UncheckedIOException("Could not create a unique batch upload source", exception);
+                }
+                copiesOnDisk.add(copy);
+            }
+            return List.copyOf(copiesOnDisk);
+        });
         context.runOnClient(client -> {
             if (!CustomPaintingsClient.imports().importImages(files, PaintingSizes.DEFAULT)) {
                 throw new AssertionError("Batch upload did not start");

@@ -14,7 +14,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import java.util.List;
 
 /**
- * Protocol v4: built for an unbounded library.
+ * Protocol v5: built for an unbounded library and synchronizes the persistent id high-water mark.
  *
  * <p>Metadata and pixels are separated. A sync sends only small metadata pages, and image
  * bytes move lazily in {@value #CHUNK_BYTES}-byte chunks in either direction, so neither a
