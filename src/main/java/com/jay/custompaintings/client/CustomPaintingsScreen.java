@@ -38,8 +38,9 @@ public final class CustomPaintingsScreen extends Screen {
     private PaintingList list;
     private Button uploadButton;
     private Button reloadButton;
-    private Button renameButton;
-    private Button sizeButton;
+    private Button editButton;
+    private Button applyButton;
+    private Button discardButton;
     private Button removeButton;
     private Button detailsButton;
     private ImageFileChooser chooser;
@@ -89,20 +90,24 @@ public final class CustomPaintingsScreen extends Screen {
 
         int bottom = this.height - 32;
         int editY = this.height - 58;
-        int smallWidth = Math.max(48, (contentWidth - gap * 3) / 4);
-        int smallLeft = (this.width - smallWidth * 4 - gap * 3) / 2;
-        renameButton = Button.builder(Component.translatable("config.custompaintings.rename"), button -> editName())
+        int smallWidth = Math.max(48, (contentWidth - gap * 4) / 5);
+        int smallLeft = (this.width - smallWidth * 5 - gap * 4) / 2;
+        editButton = Button.builder(Component.translatable("config.custompaintings.rename"), button -> editSelected())
                 .bounds(smallLeft, editY, smallWidth, 20).build();
-        addRenderableWidget(renameButton);
-        sizeButton = Button.builder(Component.translatable("config.custompaintings.size"), button -> editSize())
-                .bounds(smallLeft + smallWidth + gap, editY, smallWidth, 20)
-                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.size.tooltip"))).build();
-        addRenderableWidget(sizeButton);
+        addRenderableWidget(editButton);
         removeButton = Button.builder(Component.translatable("config.custompaintings.remove"), button -> confirmRemove())
-                .bounds(smallLeft + (smallWidth + gap) * 2, editY, smallWidth, 20).build();
+                .bounds(smallLeft + smallWidth + gap, editY, smallWidth, 20).build();
         addRenderableWidget(removeButton);
+        applyButton = Button.builder(Component.translatable("config.custompaintings.apply"), button -> applyDrafts())
+                .bounds(smallLeft + (smallWidth + gap) * 2, editY, smallWidth, 20)
+                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.apply.tooltip"))).build();
+        addRenderableWidget(applyButton);
+        discardButton = Button.builder(Component.translatable("config.custompaintings.discard"), button -> discardDrafts())
+                .bounds(smallLeft + (smallWidth + gap) * 3, editY, smallWidth, 20)
+                .tooltip(Tooltip.create(Component.translatable("config.custompaintings.discard.tooltip"))).build();
+        addRenderableWidget(discardButton);
         addRenderableWidget(Button.builder(Component.translatable("config.custompaintings.done"), button -> onClose())
-                .bounds(smallLeft + (smallWidth + gap) * 3, editY, smallWidth, 20).build());
+                .bounds(smallLeft + (smallWidth + gap) * 4, editY, smallWidth, 20).build());
         addRenderableWidget(Button.builder(Component.translatable("config.custompaintings.openFolder"), button -> openFolder())
                 .bounds((this.width - 160) / 2, bottom, 160, 20)
                 .tooltip(Tooltip.create(Component.translatable("config.custompaintings.openFolder.tooltip"))).build());
@@ -160,17 +165,11 @@ public final class CustomPaintingsScreen extends Screen {
         updateControls();
     }
 
-    private void editName() {
+    private void editSelected() {
         PaintingEntry entry = selected();
         if (entry != null && !imports.state().busy()) {
-            minecraft.gui.setScreen(new EditPaintingScreen(this, entry));
-        }
-    }
-
-    private void editSize() {
-        PaintingEntry entry = selected();
-        if (entry != null && !imports.state().busy()) {
-            minecraft.gui.setScreen(new EditPaintingScreen(this, entry));
+            PaintingEntry draft = CustomPaintingsClient.drafts().displayEntry(entry.slot(), library.library());
+            minecraft.gui.setScreen(new EditPaintingScreen(this, draft != null ? draft : entry));
         }
     }
 
@@ -179,20 +178,24 @@ public final class CustomPaintingsScreen extends Screen {
         if (entry == null || imports.state().busy()) {
             return;
         }
-        minecraft.gui.setScreen(new net.minecraft.client.gui.screens.ConfirmScreen(confirmed -> {
-            minecraft.gui.setScreen(this);
-            if (confirmed) {
-                clearNotice();
-                if (imports.remove(entry.slot())) {
-                    selectedSlot = -1;
-                } else {
-                    setNotice(Component.translatable("config.custompaintings.remove.failed", entry.name()), ERROR);
-                }
-            }
-        }, Component.translatable("config.custompaintings.remove.title"),
-                Component.translatable("config.custompaintings.remove.message", entry.name()),
-                Component.translatable("config.custompaintings.remove.confirm"),
-                Component.translatable("config.custompaintings.cancel")));
+        // Removals are staged too: nothing leaves the server until Apply is pressed.
+        CustomPaintingsClient.drafts().markRemoved(entry.slot());
+        setNotice(Component.translatable("config.custompaintings.remove.staged", entry.name()), WARNING);
+        updateControls();
+    }
+
+    private void applyDrafts() {
+        clearNotice();
+        if (!imports.applyDrafts()) {
+            setNotice(Component.translatable("config.custompaintings.apply.empty"), MUTED);
+        }
+        updateControls();
+    }
+
+    private void discardDrafts() {
+        CustomPaintingsClient.drafts().discard();
+        setNotice(Component.translatable("config.custompaintings.discard.done"), MUTED);
+        updateControls();
     }
 
     private PaintingEntry selected() {
@@ -227,6 +230,11 @@ public final class CustomPaintingsScreen extends Screen {
         if (manager.snapshot().generation() != displayedGeneration) {
             rebuildWidgets();
         }
+        int conflicts = CustomPaintingsClient.drafts().conflictCount();
+        if (conflicts > 0) {
+            CustomPaintingsClient.drafts().clearConflicts();
+            setNotice(Component.translatable("config.custompaintings.draft.conflict", conflicts), WARNING);
+        }
         updateControls();
     }
 
@@ -239,9 +247,15 @@ public final class CustomPaintingsScreen extends Screen {
         uploadButton.active = editable && library.library().freeSlots() > 0;
         reloadButton.active = !busy;
         PaintingEntry entry = selected();
-        renameButton.active = editable && entry != null;
-        sizeButton.active = editable && entry != null;
-        removeButton.active = editable && entry != null;
+        editButton.active = editable && entry != null;
+        removeButton.active = editable && entry != null && !CustomPaintingsClient.drafts().isRemoved(entry.slot());
+        boolean hasDrafts = CustomPaintingsClient.drafts().hasChanges(library.library());
+        applyButton.active = editable && hasDrafts;
+        discardButton.active = editable && hasDrafts;
+        int pending = CustomPaintingsClient.drafts().changeCount(library.library());
+        applyButton.setMessage(pending > 0
+                ? Component.translatable("config.custompaintings.apply.count", pending)
+                : Component.translatable("config.custompaintings.apply"));
         PaintingImportService.State state = imports.state();
         detailsButton.active = !busy && (state.report() != null || state.error() != null);
         uploadButton.setMessage(Component.translatable(state.phase() == PaintingImportService.Phase.IMPORTING
@@ -264,10 +278,13 @@ public final class CustomPaintingsScreen extends Screen {
         graphics.centeredText(this.font, this.title, this.width / 2, 9, TEXT);
         graphics.centeredText(this.font, Component.translatable("config.custompaintings.summary",
                 library.library().count(), PaintingEntry.MAX_PAINTINGS), this.width / 2, 25, SUCCESS);
-        String hint = library.synced()
-                ? (library.canEdit() ? Component.translatable("config.custompaintings.editable").getString()
-                : Component.translatable("config.custompaintings.readOnly").getString())
-                : Component.translatable("config.custompaintings.waitingSync").getString();
+        int pending = CustomPaintingsClient.drafts().changeCount(library.library());
+        String hint = !library.synced()
+                ? Component.translatable("config.custompaintings.waitingSync").getString()
+                : pending > 0
+                ? Component.translatable("config.custompaintings.draft.pending", pending).getString()
+                : (library.canEdit() ? Component.translatable("config.custompaintings.editable").getString()
+                : Component.translatable("config.custompaintings.readOnly").getString());
         graphics.centeredText(this.font, this.font.plainSubstrByWidth(hint, this.width - 24), this.width / 2, 40, MUTED);
 
         Component status = notice != null ? notice : statusMessage();
@@ -293,10 +310,11 @@ public final class CustomPaintingsScreen extends Screen {
             case IDLE -> Component.translatable("config.custompaintings.ready");
             case IMPORTING -> Component.translatable("config.custompaintings.import.progress",
                     state.completed(), state.total(), state.currentFile());
+            case APPLYING -> Component.translatable("config.custompaintings.apply.progress");
             case REMOVING -> Component.translatable("config.custompaintings.remove.progress", state.currentFile());
             case RELOADING -> Component.translatable("config.custompaintings.import.applying");
             case FINISHED -> state.report() == null
-                    ? Component.translatable("config.custompaintings.reload.success")
+                    ? Component.translatable("config.custompaintings.operation.success")
                     : Component.translatable("config.custompaintings.import.result", state.report().importedCount(),
                     state.report().duplicateCount(), state.report().failedCount());
             case FAILED -> Component.translatable("config.custompaintings.import.failed", state.error());
@@ -307,7 +325,7 @@ public final class CustomPaintingsScreen extends Screen {
         PaintingImportService.State state = imports.state();
         return switch (state.phase()) {
             case IDLE -> MUTED;
-            case IMPORTING, REMOVING, RELOADING -> WARNING;
+            case IMPORTING, APPLYING, REMOVING, RELOADING -> WARNING;
             case FINISHED -> state.report() != null && state.report().failedCount() > 0 ? WARNING : SUCCESS;
             case FAILED -> ERROR;
         };
@@ -349,17 +367,32 @@ public final class CustomPaintingsScreen extends Screen {
 
         @Override
         public Component getNarration() {
-            return Component.literal(painting.entry().name() + ": ").append(status());
+            return Component.literal(displayEntry().name() + ": ").append(status());
+        }
+
+        private PaintingEntry displayEntry() {
+            int slot = painting.entry().slot();
+            PaintingEntry draft = CustomPaintingsClient.drafts().displayEntry(slot, CustomPaintingsClient.library().library());
+            return draft != null ? draft : painting.entry();
         }
 
         private Component status() {
             if (!painting.successful()) {
                 return Component.translatable("config.custompaintings.error", painting.error());
             }
-            PaintingEntry entry = painting.entry();
-            return Component.translatable("config.custompaintings.entryStatus", entry.sizeLabel(),
+            int slot = painting.entry().slot();
+            if (CustomPaintingsClient.drafts().isRemoved(slot)) {
+                return Component.translatable("config.custompaintings.draft.pendingRemoval");
+            }
+            PaintingEntry entry = displayEntry();
+            Component base = Component.translatable("config.custompaintings.entryStatus", entry.sizeLabel(),
                     Component.translatable(entry.fit().translationKey()).getString(),
                     RecipeCatalog.get(entry.recipeId()).label());
+            PaintingEntry applied = CustomPaintingsClient.library().library().get(slot).orElse(null);
+            if (applied != null && !applied.equals(entry)) {
+                return Component.literal(base.getString()).append(Component.translatable("config.custompaintings.draft.pendingSuffix"));
+            }
+            return base;
         }
 
         @Override
@@ -378,7 +411,7 @@ public final class CustomPaintingsScreen extends Screen {
             }
             int textX = x + 56;
             int textWidth = Math.max(10, width - 60);
-            graphics.text(minecraft.font, minecraft.font.plainSubstrByWidth(painting.entry().name(), textWidth), textX, y + 4, TEXT);
+            graphics.text(minecraft.font, minecraft.font.plainSubstrByWidth(displayEntry().name(), textWidth), textX, y + 4, TEXT);
             String statusText = minecraft.font.plainSubstrByWidth(status().getString(), textWidth);
             graphics.text(minecraft.font, statusText, textX, y + 21, painting.successful() ? SUCCESS : ERROR);
             graphics.text(minecraft.font, Component.translatable("config.custompaintings.slot", painting.entry().slot() + 1),

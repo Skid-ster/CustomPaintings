@@ -2,6 +2,7 @@ package com.jay.custompaintings.network;
 
 import com.jay.custompaintings.CustomPaintingsMod;
 import com.jay.custompaintings.image.ImageFit;
+import com.jay.custompaintings.library.PaintingEdit;
 import com.jay.custompaintings.library.PaintingEntry;
 import com.jay.custompaintings.library.PaintingLibrary;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -99,6 +100,68 @@ public final class PaintingPayloads {
         }
     }
 
+    /** One staged metadata edit inside an Apply batch. */
+    public record EditData(int slot, String name, int width, int height, String fit) {
+        public static final StreamCodec<RegistryFriendlyByteBuf, EditData> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_INT, EditData::slot,
+                ByteBufCodecs.STRING_UTF8, EditData::name,
+                ByteBufCodecs.VAR_INT, EditData::width,
+                ByteBufCodecs.VAR_INT, EditData::height,
+                ByteBufCodecs.STRING_UTF8, EditData::fit,
+                EditData::new);
+
+        public PaintingEdit edit() {
+            return new PaintingEdit(slot, name, width, height, ImageFit.fromId(fit));
+        }
+
+        public static EditData from(PaintingEdit edit) {
+            return new EditData(edit.slot(), edit.name(), edit.width(), edit.height(), edit.fit().id());
+        }
+    }
+
+    /** Apply every staged edit/removal together after one explicit user confirmation. */
+    public record ApplyBatch(long requestId, long expectedRevision, List<EditData> edits, List<Integer> removals)
+            implements CustomPacketPayload {
+        public static final Type<ApplyBatch> TYPE = new Type<>(CustomPaintingsMod.id("apply_batch_v3"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, ApplyBatch> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_LONG, ApplyBatch::requestId,
+                ByteBufCodecs.VAR_LONG, ApplyBatch::expectedRevision,
+                EditData.STREAM_CODEC.apply(ByteBufCodecs.list(PaintingEntry.MAX_PAINTINGS)), ApplyBatch::edits,
+                ByteBufCodecs.VAR_INT.apply(ByteBufCodecs.list(PaintingEntry.MAX_PAINTINGS)), ApplyBatch::removals,
+                ApplyBatch::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
+    /** One prepared master PNG inside an atomic multi-image upload. */
+    public record UploadData(String name, int width, int height, String fit, byte[] png) {
+        public static final StreamCodec<RegistryFriendlyByteBuf, UploadData> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.STRING_UTF8, UploadData::name,
+                ByteBufCodecs.VAR_INT, UploadData::width,
+                ByteBufCodecs.VAR_INT, UploadData::height,
+                ByteBufCodecs.STRING_UTF8, UploadData::fit,
+                ByteBufCodecs.byteArray(MAX_IMAGE_BYTES), UploadData::png,
+                UploadData::new);
+    }
+
+    /** Upload a whole selected batch as one server mutation, one manifest save and one sync. */
+    public record UploadBatch(long requestId, List<UploadData> images) implements CustomPacketPayload {
+        public static final int MAX_UPLOAD_BATCH_BYTES = PaintingEntry.MAX_PAINTINGS * (MAX_IMAGE_BYTES + 1024);
+        public static final Type<UploadBatch> TYPE = new Type<>(CustomPaintingsMod.id("upload_batch_v3"));
+        public static final StreamCodec<RegistryFriendlyByteBuf, UploadBatch> STREAM_CODEC = StreamCodec.composite(
+                ByteBufCodecs.VAR_LONG, UploadBatch::requestId,
+                UploadData.STREAM_CODEC.apply(ByteBufCodecs.list(PaintingEntry.MAX_PAINTINGS)), UploadBatch::images,
+                UploadBatch::new);
+
+        @Override
+        public Type<? extends CustomPacketPayload> type() {
+            return TYPE;
+        }
+    }
+
     public record Remove(long requestId, int slot) implements CustomPacketPayload {
         public static final Type<Remove> TYPE = new Type<>(CustomPaintingsMod.id("remove"));
         public static final StreamCodec<RegistryFriendlyByteBuf, Remove> STREAM_CODEC = StreamCodec.composite(
@@ -112,7 +175,7 @@ public final class PaintingPayloads {
 
     /** Sent by the client once its play listener is ready, so login cannot race channel registration. */
     public record SyncRequest(int protocolVersion) implements CustomPacketPayload {
-        public static final int PROTOCOL_VERSION = 2;
+        public static final int PROTOCOL_VERSION = 3;
         public static final Type<SyncRequest> TYPE = new Type<>(CustomPaintingsMod.id("request_sync"));
         public static final StreamCodec<RegistryFriendlyByteBuf, SyncRequest> STREAM_CODEC =
                 StreamCodec.of((buf, request) -> buf.writeVarInt(request.protocolVersion()),
@@ -143,6 +206,9 @@ public final class PaintingPayloads {
         PayloadTypeRegistry.clientboundPlay().registerLarge(Sync.TYPE, Sync.STREAM_CODEC, MAX_SYNC_BYTES);
         PayloadTypeRegistry.clientboundPlay().register(Result.TYPE, Result.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().registerLarge(Upload.TYPE, Upload.STREAM_CODEC, MAX_IMAGE_BYTES + 1024);
+        PayloadTypeRegistry.serverboundPlay().registerLarge(UploadBatch.TYPE, UploadBatch.STREAM_CODEC,
+                UploadBatch.MAX_UPLOAD_BATCH_BYTES);
+        PayloadTypeRegistry.serverboundPlay().register(ApplyBatch.TYPE, ApplyBatch.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(Rename.TYPE, Rename.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(Adjust.TYPE, Adjust.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(Remove.TYPE, Remove.STREAM_CODEC);

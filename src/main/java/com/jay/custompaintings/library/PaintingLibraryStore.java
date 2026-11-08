@@ -181,6 +181,122 @@ public final class PaintingLibraryStore {
         Files.deleteIfExists(imagePath(entry));
     }
 
+    /** Upload several prepared master PNGs as one authoritative mutation and one manifest save. */
+    public synchronized List<PaintingEntry> addBatch(List<Upload> uploads) throws IOException {
+        Objects.requireNonNull(uploads, "uploads");
+        if (uploads.isEmpty()) {
+            throw new IOException("No paintings to add");
+        }
+        if (uploads.size() > PaintingEntry.MAX_PAINTINGS || uploads.size() > library.freeSlots()) {
+            throw new IOException("Only " + library.freeSlots() + " free painting slot(s) remain");
+        }
+        // Validate the whole batch before touching the image directory so a bad file cannot
+        // leave a half-applied upload behind.
+        for (Upload upload : uploads) {
+            Objects.requireNonNull(upload, "upload");
+            if (!PaintingSizes.isSupported(upload.width(), upload.height())) {
+                throw new IOException("Unsupported painting size");
+            }
+            Objects.requireNonNull(upload.fit(), "fit");
+            validateMaster(upload.png());
+        }
+        if (library.count() == 0 && library.recipeSeed() == 0) {
+            library = new PaintingLibrary(library.revision(), new SecureRandom().nextLong(), List.of());
+        }
+        List<PaintingEntry> added = new ArrayList<>();
+        List<PaintingEntry> entries = new ArrayList<>(library.entries());
+        try {
+            for (Upload upload : uploads) {
+                int slot = firstFreeSlot(entries);
+                PaintingEntry entry = writeImage(slot, upload.name(), upload.width(), upload.height(),
+                        upload.fit(), upload.png(), library.recipeFor(slot));
+                added.add(entry);
+                entries.add(entry);
+            }
+            save(new PaintingLibrary(library.revision() + 1, library.recipeSeed(), entries));
+            return List.copyOf(added);
+        } catch (IOException | RuntimeException exception) {
+            for (PaintingEntry entry : added) {
+                try {
+                    Files.deleteIfExists(imagePath(entry));
+                } catch (IOException cleanup) {
+                    exception.addSuppressed(cleanup);
+                }
+            }
+            throw exception;
+        }
+    }
+
+    /**
+     * Apply a whole draft batch atomically: validate every edit/removal against the expected
+     * revision, save the manifest once, then delete removed masters. Metadata edits keep the
+     * original PNG bytes and digest untouched.
+     */
+    public synchronized void applyBatch(long expectedRevision, List<PaintingEdit> edits, List<Integer> removals)
+            throws IOException {
+        Objects.requireNonNull(edits, "edits");
+        Objects.requireNonNull(removals, "removals");
+        if (edits.isEmpty() && removals.isEmpty()) {
+            throw new IOException("No staged changes to apply");
+        }
+        if (edits.size() + removals.size() > PaintingEntry.MAX_PAINTINGS) {
+            throw new IOException("Too many staged changes");
+        }
+        if (library.revision() != expectedRevision) {
+            throw new IOException("The painting library changed since these edits were staged; discard and review again");
+        }
+        java.util.Set<Integer> touched = new java.util.HashSet<>();
+        for (PaintingEdit edit : edits) {
+            Objects.requireNonNull(edit, "edit");
+            if (!touched.add(edit.slot())) {
+                throw new IOException("Duplicate staged edit for slot " + edit.slot());
+            }
+            PaintingEntry entry = library.get(edit.slot())
+                    .orElseThrow(() -> new IOException("Empty painting slot " + edit.slot()));
+            verifyImage(entry);
+        }
+        for (int slot : removals) {
+            if (!touched.add(slot)) {
+                throw new IOException("Slot " + slot + " is both edited and removed");
+            }
+            library.get(slot).orElseThrow(() -> new IOException("Empty painting slot " + slot));
+        }
+        List<PaintingEntry> entries = new ArrayList<>();
+        for (PaintingEntry entry : library.entries()) {
+            if (removals.contains(entry.slot())) {
+                continue;
+            }
+            PaintingEntry replacement = entry;
+            for (PaintingEdit edit : edits) {
+                if (edit.slot() == entry.slot()) {
+                    replacement = edit.applyTo(entry);
+                    break;
+                }
+            }
+            entries.add(replacement);
+        }
+        List<PaintingEntry> removedEntries = library.entries().stream()
+                .filter(entry -> removals.contains(entry.slot())).toList();
+        save(new PaintingLibrary(library.revision() + 1, library.recipeSeed(), entries));
+        for (PaintingEntry entry : removedEntries) {
+            Files.deleteIfExists(imagePath(entry));
+        }
+    }
+
+    private static int firstFreeSlot(List<PaintingEntry> entries) throws IOException {
+        for (int slot = 0; slot < PaintingEntry.MAX_PAINTINGS; slot++) {
+            int candidate = slot;
+            if (entries.stream().noneMatch(entry -> entry.slot() == candidate)) {
+                return slot;
+            }
+        }
+        throw new IOException("All 10 custom painting slots are full");
+    }
+
+    /** One prepared image in an atomic upload batch. */
+    public record Upload(String name, int width, int height, ImageFit fit, byte[] png) {
+    }
+
     private PaintingEntry writeImage(int slot, String name, int width, int height, ImageFit fit,
                                      byte[] png, String recipe) throws IOException {
         if (!PaintingSizes.isSupported(width, height)) {

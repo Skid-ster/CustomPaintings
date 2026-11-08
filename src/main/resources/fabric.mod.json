@@ -3,7 +3,7 @@
   "id": "custompaintings",
   "version": "${version}",
   "name": "Custom Paintings",
-  "description": "Turn up to 10 PNG/JPG uploads into named, craftable custom paintings with adjustable 1–8 block sizes, fit/fill/stretch modes and preserved transparency.",
+  "description": "Turn up to 10 PNG/JPG uploads into named, craftable custom paintings with adjustable 1–8 block sizes, fit/fill/stretch modes, preserved transparency and batched Apply/Discard editing.",
   "authors": ["Skid-ster"],
   "contact": {
     "homepage": "https://github.com/Skid-ster/CustomPaintings",

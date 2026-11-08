@@ -17,6 +17,7 @@ public final class CustomPaintingsClient implements ClientModInitializer {
     private static ClientPaintingLibrary library;
     private static PaintingTextureManager paintings;
     private static PaintingImportService imports;
+    private static PaintingDrafts drafts;
 
     public static ClientPaintingLibrary library() {
         return library;
@@ -30,13 +31,18 @@ public final class CustomPaintingsClient implements ClientModInitializer {
         return imports;
     }
 
+    public static PaintingDrafts drafts() {
+        return drafts;
+    }
+
     @Override
     public void onInitializeClient() {
         library = new ClientPaintingLibrary();
         PaintingLibraryAccess.set(library::library);
         paintings = new PaintingTextureManager(library, CustomPaintingsMod.imagesDirectory());
-        imports = new PaintingImportService(library);
-        ClientPaintingNetwork.register(library, imports);
+        drafts = new PaintingDrafts();
+        imports = new PaintingImportService(library, drafts);
+        ClientPaintingNetwork.register(library, imports, drafts);
         Identifier applyId = CustomPaintingsMod.id("apply_textures");
         ResourceLoader loader = ResourceLoader.get(PackType.CLIENT_RESOURCES);
         loader.registerReloadListener(applyId, new PreparableReloadListener() {
