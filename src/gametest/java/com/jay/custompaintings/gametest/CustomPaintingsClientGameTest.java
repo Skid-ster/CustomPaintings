@@ -589,6 +589,28 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                 }
             }
             if (artworkPixels < 100) {
+                System.out.println("Screenshot dimensions: " + image.getWidth() + "x" + image.getHeight());
+                System.out.println("Screenshot sample follows (R/G/B = artwork, # = bright neutral, . = dark):");
+                int sampleWidth = 64;
+                int sampleHeight = 32;
+                for (int sy = 0; sy < sampleHeight; sy++) {
+                    StringBuilder row = new StringBuilder(sampleWidth);
+                    for (int sx = 0; sx < sampleWidth; sx++) {
+                        int pixel = image.getPixel(sx * image.getWidth() / sampleWidth,
+                                sy * image.getHeight() / sampleHeight);
+                        int red = pixel >> 16 & 255;
+                        int green = pixel >> 8 & 255;
+                        int blue = pixel & 255;
+                        char sample = red > 90 && red > green * 1.5 && red > blue * 1.5 ? 'R'
+                                : green > 90 && green > red * 1.5 && green > blue * 1.5 ? 'G'
+                                : blue > 90 && blue > red * 1.5 && blue > green * 1.5 ? 'B'
+                                : red > 180 && green > 180 && blue < 100 ? 'Y'
+                                : red > 200 && blue > 200 && green < 100 ? 'M'
+                                : Math.max(red, Math.max(green, blue)) > 160 ? '#' : '.';
+                        row.append(sample);
+                    }
+                    System.out.println(row);
+                }
                 throw new AssertionError("Screenshot did not contain enough uploaded artwork pixels: " + artworkPixels);
             }
         } catch (IOException exception) {
