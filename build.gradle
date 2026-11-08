@@ -74,6 +74,8 @@ dependencies {
 }
 
 tasks.named('runClientGameTest') {
+    // Keep the software CI runner on OpenGL; Vulkan's headless presentation path yields blank captures.
+    args '--graphicsBackend', 'OPENGL'
     doFirst {
         // Minecraft 26.3 can default to Vulkan; force the software OpenGL path used by CI.
         def runDir = file('build/run/clientGameTest')
