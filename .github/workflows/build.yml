@@ -60,12 +60,9 @@ jobs:
           gradle-version: '9.6.0'
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
-
       - name: Build and test
         shell: bash
-        run: ./gradlew build --no-daemon --stacktrace 2>&1 | tee build.log
+        run: gradle build --no-daemon --stacktrace 2>&1 | tee build.log
 
       - name: Publish build diagnostics
         if: failure()
@@ -136,12 +133,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb xauth libgl1-mesa-dri libegl1 mesa-vulkan-drivers
 
-      - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
-
       - name: Run Minecraft client gametest
         shell: bash
-        run: ./gradlew runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
+        run: gradle runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
 
       - name: Publish client gametest diagnostics
         if: failure()
