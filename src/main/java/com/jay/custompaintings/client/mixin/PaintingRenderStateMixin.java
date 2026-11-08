@@ -1,5 +1,6 @@
 package com.jay.custompaintings.client.mixin;
 
+import com.jay.custompaintings.client.PaintingRenderStateAccess;
 import net.minecraft.client.renderer.entity.state.PaintingRenderState;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;

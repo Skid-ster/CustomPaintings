@@ -1,4 +1,4 @@
-package com.jay.custompaintings.client.mixin;
+package com.jay.custompaintings.client;
 
 /** Duck interface carrying the custom painting id from the entity into its render state. */
 public interface PaintingRenderStateAccess {

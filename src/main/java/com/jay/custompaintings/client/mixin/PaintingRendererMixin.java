@@ -1,6 +1,7 @@
 package com.jay.custompaintings.client.mixin;
 
 import com.jay.custompaintings.client.CustomPaintingsClient;
+import com.jay.custompaintings.client.PaintingRenderStateAccess;
 import com.jay.custompaintings.client.PaintingTextureManager;
 import com.jay.custompaintings.library.PaintingData;
 import com.mojang.blaze3d.vertex.PoseStack;
