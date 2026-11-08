@@ -281,7 +281,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
     private static void configureHeadlessRenderDistance(ClientGameTestContext context) {
         context.runOnClient(client -> {
             client.options.renderDistance().set(2);
-            client.options.simulationDistance().set(2);
+            client.options.simulationDistance().set(5);
             if (client.options.getEffectiveRenderDistance() > 2) {
                 throw new AssertionError("Headless render distance did not take effect: "
                         + client.options.getEffectiveRenderDistance());
