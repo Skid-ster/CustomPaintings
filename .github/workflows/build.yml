@@ -162,7 +162,7 @@ jobs:
           gradle runClientGameTest --no-daemon --stacktrace 2>&1 | tee client-gametest.log
 
       - name: Emit compact screenshot previews for visual review
-        if: always() && github.event_name == 'workflow_dispatch' && inputs.review_screenshots
+        if: always() && github.event_name == 'push' && contains(github.event.head_commit.message, '[visual-review]')
         shell: bash
         run: |
           set -euo pipefail
