@@ -67,6 +67,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
                 .adjustSettings(settings -> settings.setGameMode(WorldCreationUiState.SelectedGameMode.CREATIVE))
                 .create()) {
             save = world.getWorldSave();
+            world.getConnection().waitForChunksRender();
             world.getServer().runCommand("time set day");
             world.getServer().runCommand("weather clear");
             context.waitFor(client -> CustomPaintingsClient.library().synced()
