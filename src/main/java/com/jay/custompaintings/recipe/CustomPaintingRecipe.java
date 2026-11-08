@@ -2,26 +2,26 @@ package com.jay.custompaintings.recipe;
 
 import com.jay.custompaintings.item.CustomPaintingItems;
 import com.jay.custompaintings.library.PaintingEntry;
+import com.jay.custompaintings.library.PaintingLibrary;
+import com.jay.custompaintings.library.PaintingLibraryAccess;
 import com.jay.custompaintings.library.RecipeCatalog;
 import com.jay.custompaintings.server.PaintingServerState;
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.MapCodec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
-import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
-
+import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.resources.Identifier;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.ItemStackTemplate;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.crafting.CraftingBookCategory;
 import net.minecraft.world.item.crafting.CraftingInput;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.Ingredient;
 import net.minecraft.world.item.crafting.PlacementInfo;
-import net.minecraft.world.item.crafting.Recipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.item.crafting.display.RecipeDisplay;
 import net.minecraft.world.item.crafting.display.ShapelessCraftingRecipeDisplay;
@@ -32,55 +32,78 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Data-driven slot recipe. The JSON is static, while ingredients/result visibility follow the
- * authoritative library. A server data reload refreshes the recipe book after uploads/renames.
+ * Data-driven wood/dye recipe. Each JSON names one catalogue combination (for example
+ * {@code oak_red}); the painting that currently owns that combination is resolved from the
+ * live library, so uploading artwork never needs a new recipe file or a data reload.
+ *
+ * <p>The catalogue is finite (192 combinations). Paintings beyond it have no recipe and are
+ * taken from the Painting Menu instead, which works in Survival and Creative.</p>
  */
 public final class CustomPaintingRecipe implements CraftingRecipe {
     public static final MapCodec<CustomPaintingRecipe> MAP_CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(
-            Codec.intRange(0, PaintingEntry.MAX_PAINTINGS - 1).fieldOf("slot").forGetter(recipe -> recipe.slot)
+            Codec.STRING.fieldOf("recipe").forGetter(recipe -> recipe.recipeId)
     ).apply(instance, CustomPaintingRecipe::new));
     public static final StreamCodec<RegistryFriendlyByteBuf, CustomPaintingRecipe> STREAM_CODEC =
-            StreamCodec.of((buf, recipe) -> buf.writeVarInt(recipe.slot),
-                    buf -> new CustomPaintingRecipe(buf.readVarInt()));
+            StreamCodec.composite(ByteBufCodecs.STRING_UTF8, recipe -> recipe.recipeId, CustomPaintingRecipe::new);
     public static final RecipeSerializer<CustomPaintingRecipe> SERIALIZER = new RecipeSerializer<>(MAP_CODEC, STREAM_CODEC);
 
-    private final int slot;
-    private PlacementInfo placementInfo;
+    private final String recipeId;
+    /** Ingredients never change, so they can be cached; ownership must always be re-resolved. */
+    private volatile List<Ingredient> ingredients;
+    private volatile PlacementInfo placementInfo;
 
-    private CustomPaintingRecipe(int slot) {
-        this.slot = slot;
+    private CustomPaintingRecipe(String recipeId) {
+        if (!RecipeCatalog.contains(recipeId)) {
+            throw new IllegalArgumentException("Unknown crafting recipe: " + recipeId);
+        }
+        this.recipeId = recipeId;
     }
 
+    private static Optional<PaintingEntry> owner(PaintingLibrary library, String recipeId) {
+        // The catalogue is small and libraries are modest; a linear scan avoids any index
+        // that could go stale when paintings are added, removed or reassigned.
+        for (PaintingEntry entry : library.entries()) {
+            if (recipeId.equals(entry.recipeId())) {
+                return Optional.of(entry);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Server-authoritative owner, used when actually crafting. */
     private Optional<PaintingEntry> entry() {
-        return PaintingServerState.library().get(slot);
+        return owner(PaintingServerState.library(), recipeId);
     }
 
     private Optional<PaintingEntry> entry(Level level) {
-        return (level.isClientSide() ? com.jay.custompaintings.library.PaintingLibraryAccess.current()
-                : PaintingServerState.library()).get(slot);
+        return owner(level.isClientSide() ? PaintingLibraryAccess.current() : PaintingServerState.library(), recipeId);
     }
 
-    private List<Ingredient> ingredients(PaintingEntry entry) {
-        Registry<net.minecraft.world.item.Item> registry = BuiltInRegistries.ITEM;
-        return RecipeCatalog.get(entry.recipeId()).ingredients().stream()
-                .map(id -> Ingredient.of(registry.getOptional(Identifier.parse(id))
-                        .orElseThrow(() -> new IllegalStateException("Missing recipe ingredient: " + id))))
-                .toList();
+    private List<Ingredient> ingredients() {
+        List<Ingredient> cached = ingredients;
+        if (cached == null) {
+            cached = RecipeCatalog.get(recipeId).ingredients().stream()
+                    .map(id -> Ingredient.of(BuiltInRegistries.ITEM.getOptional(Identifier.parse(id))
+                            .orElseThrow(() -> new IllegalStateException("Missing recipe ingredient: " + id))))
+                    .toList();
+            ingredients = cached;
+        }
+        return cached;
     }
 
     @Override
     public boolean matches(CraftingInput input, Level level) {
-        Optional<PaintingEntry> entry = entry(level);
-        if (entry.isEmpty() || input.ingredientCount() != 2) {
+        // Unowned combinations craft nothing, but their placement info stays valid so the
+        // recipe becomes usable the moment a painting claims the combination.
+        if (entry(level).isEmpty() || input.ingredientCount() != 2) {
             return false;
         }
-        List<Ingredient> ingredients = ingredients(entry.get());
-        return input.stackedContents().canCraft(ingredients, null);
+        return input.stackedContents().canCraft(this, null);
     }
 
     @Override
     public ItemStack assemble(CraftingInput input) {
-        return entry().map(entry -> CustomPaintingItems.stack(slot)).orElse(ItemStack.EMPTY);
+        return entry().map(entry -> CustomPaintingItems.stack(entry.id())).orElse(ItemStack.EMPTY);
     }
 
     @Override
@@ -91,6 +114,12 @@ public final class CustomPaintingRecipe implements CraftingRecipe {
     @Override
     public CraftingBookCategory category() {
         return CraftingBookCategory.MISC;
+    }
+
+    @Override
+    public boolean isSpecial() {
+        // Dynamic result: never offer it as a static recipe-book entry.
+        return true;
     }
 
     @Override
@@ -105,20 +134,20 @@ public final class CustomPaintingRecipe implements CraftingRecipe {
 
     @Override
     public PlacementInfo placementInfo() {
-        if (placementInfo == null) {
-            placementInfo = entry().map(entry -> PlacementInfo.create(ingredients(entry)))
-                    .orElse(PlacementInfo.NOT_PLACEABLE);
+        PlacementInfo cached = placementInfo;
+        if (cached == null) {
+            cached = PlacementInfo.create(ingredients());
+            placementInfo = cached;
         }
-        return placementInfo;
+        return cached;
     }
 
     @Override
     public List<RecipeDisplay> display() {
         return entry().map(entry -> List.<RecipeDisplay>of(new ShapelessCraftingRecipeDisplay(
-                ingredients(entry).stream().map(Ingredient::display).toList(),
-                new SlotDisplay.ItemStackSlotDisplay(new ItemStackTemplate(CustomPaintingItems.get(slot))),
+                ingredients().stream().map(Ingredient::display).toList(),
+                new SlotDisplay.ItemStackSlotDisplay(CustomPaintingItems.template(entry.id())),
                 new SlotDisplay.ItemSlotDisplay(Items.CRAFTING_TABLE))))
                 .orElseGet(List::of);
     }
-
 }

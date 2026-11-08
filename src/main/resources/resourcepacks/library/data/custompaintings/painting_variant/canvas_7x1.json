@@ -1,0 +1,14 @@
+{
+  "width": 7,
+  "height": 1,
+  "asset_id": "custompaintings:canvas",
+  "title": {
+    "translate": "painting.custompaintings.canvas.title",
+    "with": [
+      "7 \u00d7 1"
+    ]
+  },
+  "author": {
+    "translate": "painting.custompaintings.author"
+  }
+}

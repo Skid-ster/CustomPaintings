@@ -60,6 +60,15 @@ jobs:
           gradle-version: '9.6.0'
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
+      - name: Check Java syntax and resource JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet tree-sitter tree-sitter-java
+          python3 tools/check_java_syntax.py src
+          python3 tools/check_own_api.py
+          python3 tools/check_resources.py
+
       - name: Build and test
         shell: bash
         run: gradle build --no-daemon --stacktrace 2>&1 | tee build.log
@@ -240,7 +249,7 @@ jobs:
             echo '```'
             echo
             echo 'CI compilation, unit tests, and the in-game client rendering regression test passed.'
-            echo 'The client test uploads artwork, checks painting/item atlases, places a painting, relogs, and reloads resources.'
+            echo 'The client test uploads artwork, verifies per-painting textures, exercises the Painting Menu, places a painting, and relogs.'
           } > release-notes.md
 
           echo 'skip=false' >> "$GITHUB_OUTPUT"

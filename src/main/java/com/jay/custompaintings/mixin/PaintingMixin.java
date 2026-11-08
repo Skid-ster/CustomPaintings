@@ -1,7 +1,10 @@
 package com.jay.custompaintings.mixin;
 
 import com.jay.custompaintings.item.CustomPaintingItems;
-import com.jay.custompaintings.library.PaintingRuntime;
+import com.jay.custompaintings.library.PaintingData;
+import com.jay.custompaintings.library.PaintingEntry;
+import com.jay.custompaintings.library.PaintingLibraryAccess;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.decoration.painting.Painting;
@@ -14,14 +17,20 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-/** Custom variants drop and pick as their own item instead of collapsing into vanilla paintings. */
+import java.util.OptionalInt;
+
+/**
+ * Custom paintings drop and pick as their own component-carrying item instead of collapsing
+ * into vanilla paintings. Identity comes from the synced entity attachment, so this works for
+ * any painting id rather than a fixed set of variants.
+ */
 @Mixin(Painting.class)
 public abstract class PaintingMixin {
     @Inject(method = "dropItem", at = @At("HEAD"), cancellable = true)
     private void custompaintings$dropCustomItem(ServerLevel level, Entity causedBy, CallbackInfo ci) {
         Painting self = (Painting) (Object) this;
-        var key = self.getVariant().unwrapKey().orElse(null);
-        if (key == null || PaintingRuntime.slotFromVariant(key.identifier()).isEmpty()) {
+        OptionalInt found = PaintingData.entityPaintingId(self);
+        if (found.isEmpty()) {
             return;
         }
         ci.cancel();
@@ -32,14 +41,21 @@ public abstract class PaintingMixin {
         if (causedBy instanceof Player player && player.hasInfiniteMaterials()) {
             return;
         }
-        int slot = PaintingRuntime.slotFromVariant(key.identifier()).orElseThrow();
-        self.spawnAtLocation(level, CustomPaintingItems.stack(slot));
+        self.spawnAtLocation(level, CustomPaintingItems.stack(found.getAsInt()));
     }
 
     @Inject(method = "getPickResult", at = @At("HEAD"), cancellable = true)
     private void custompaintings$pickCustomItem(CallbackInfoReturnable<ItemStack> ci) {
         Painting self = (Painting) (Object) this;
-        self.getVariant().unwrapKey().flatMap(key -> PaintingRuntime.slotFromVariant(key.identifier()))
-                .ifPresent(slot -> ci.setReturnValue(CustomPaintingItems.stack(slot)));
+        OptionalInt found = PaintingData.entityPaintingId(self);
+        if (found.isEmpty()) {
+            return;
+        }
+        ItemStack stack = CustomPaintingItems.stack(found.getAsInt());
+        PaintingEntry entry = PaintingLibraryAccess.current().get(found.getAsInt()).orElse(null);
+        if (entry != null) {
+            stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, Component.literal(entry.name()));
+        }
+        ci.setReturnValue(stack);
     }
 }

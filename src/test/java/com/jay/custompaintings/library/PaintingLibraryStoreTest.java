@@ -26,7 +26,7 @@ class PaintingLibraryStoreTest {
         PaintingLibraryStore store = new PaintingLibraryStore(temp);
         store.load();
         PaintingEntry entry = store.add("Sunset", 2, 1, ImageFit.FILL, png(64, 32));
-        assertEquals(0, entry.slot());
+        assertEquals(0, entry.id());
         assertEquals(ImageFit.FILL, entry.fit());
         assertTrue(Files.exists(store.imagePath(entry)));
         assertTrue(Files.exists(temp.resolve("library.json")));
@@ -103,8 +103,8 @@ class PaintingLibraryStoreTest {
                 new PaintingLibraryStore.Upload("Two", 1, 2, ImageFit.FILL, png(32, 64))));
         assertEquals(2, added.size());
         assertEquals(1, store.library().revision());
-        assertEquals(0, added.get(0).slot());
-        assertEquals(1, added.get(1).slot());
+        assertEquals(0, added.get(0).id());
+        assertEquals(1, added.get(1).id());
         assertEquals(ImageFit.FILL, store.library().get(1).orElseThrow().fit());
         assertThrows(java.io.IOException.class, () -> store.addBatch(List.of(
                 new PaintingLibraryStore.Upload("Bad", 1, 1, ImageFit.FIT, new byte[]{1, 2, 3}))));
