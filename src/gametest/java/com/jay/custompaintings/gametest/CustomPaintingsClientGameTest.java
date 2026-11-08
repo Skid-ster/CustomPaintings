@@ -58,6 +58,7 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
 
     @Override
     public void runTest(ClientGameTestContext context) {
+        configureHeadlessRenderDistance(context);
         Path sourceImage = createTestImage(context, "custompaintings-gametest.png", 512, 512, false);
         TestWorldSave save;
         UUID persistedPaintingId;
@@ -275,6 +276,30 @@ public final class CustomPaintingsClientGameTest implements FabricClientGameTest
     }
 
     // ---------------------------------------------------------------- artwork
+
+    /** Set the options before opening a world; the default radius stalls chunk generation on llvmpipe CI. */
+    private static void configureHeadlessRenderDistance(ClientGameTestContext context) {
+        context.runOnClient(client -> {
+            try {
+                setIntegerOption(client.options, "renderDistance", 2);
+                setIntegerOption(client.options, "simulationDistance", 2);
+                if (client.options.getEffectiveRenderDistance() > 2) {
+                    throw new AssertionError("Headless render distance did not take effect: "
+                            + client.options.getEffectiveRenderDistance());
+                }
+            } catch (ReflectiveOperationException exception) {
+                throw new AssertionError("Could not reduce the headless client chunk radius", exception);
+            }
+        });
+    }
+
+    private static void setIntegerOption(Object options, String fieldName, int value)
+            throws ReflectiveOperationException {
+        java.lang.reflect.Field field = options.getClass().getDeclaredField(fieldName);
+        field.setAccessible(true);
+        Object option = field.get(options);
+        option.getClass().getMethod("set", Object.class).invoke(option, value);
+    }
 
     private static Path createTestImage(ClientGameTestContext context, String name,
                                         int width, int height, boolean transparentCenter) {
