@@ -177,7 +177,7 @@ jobs:
           public class MakeScreenshotPreview {
               public static void main(String[] args) throws Exception {
                   BufferedImage source = ImageIO.read(new File(args[0]));
-                  BufferedImage preview = new BufferedImage(160, 90, BufferedImage.TYPE_INT_RGB);
+                  BufferedImage preview = new BufferedImage(128, 72, BufferedImage.TYPE_INT_RGB);
                   Graphics2D graphics = preview.createGraphics();
                   try {
                       graphics.drawImage(source, 0, 0, preview.getWidth(), preview.getHeight(), null);
@@ -187,7 +187,7 @@ jobs:
                   var writer = ImageIO.getImageWritersByFormatName("jpg").next();
                   ImageWriteParam params = writer.getDefaultWriteParam();
                   params.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-                  params.setCompressionQuality(0.3f);
+                  params.setCompressionQuality(0.2f);
                   try (ImageOutputStream output = ImageIO.createImageOutputStream(System.out)) {
                       writer.setOutput(output);
                       writer.write(null, new IIOImage(preview, null, null), params);
